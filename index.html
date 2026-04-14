@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Boom Therapy</title>
+<style>
+body {
+  margin: 0;
+  font-family: Inter, Arial, sans-serif;
+  background: linear-gradient(#eef6ff, #f8eeff);
+  overflow: hidden;
+}
+canvas { display: block; }
+#finishBtn {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 12;
+  border: none;
+  border-radius: 999px;
+  width: 170px;
+  height: 170px;
+  background: radial-gradient(circle at 35% 30%, #b8c3ff 0%, #8fa1ff 45%, #6f83f5 100%);
+  color: white;
+  font-weight: 800;
+  font-size: 24px;
+  line-height: 1.1;
+  box-shadow: 0 14px 34px rgba(68, 86, 180, 0.28), inset 0 2px 10px rgba(255,255,255,0.18);
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.25s ease;
+}
+#finishBtn:hover {
+  transform: scale(1.03);
+  box-shadow: 0 18px 40px rgba(68, 86, 180, 0.34), inset 0 2px 10px rgba(255,255,255,0.2);
+}
+#finishBtn:active {
+  transform: scale(0.98);
+}
+#finishBtn.clean-ui {
+  opacity: 1;
+}
+#finishBtn .big {
+  display: block;
+  font-size: 34px;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+}
+#finishBtn .small {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+  opacity: 0.95;
+}
+#sessionPanel {
+  position: fixed;
+  bottom: 18px;
+  right: 18px;
+  z-index: 10;
+  background: rgba(255,255,255,0.65);
+  backdrop-filter: blur(8px);
+  padding: 12px;
+  border-radius: 14px;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.10);
+  transition: opacity 0.25s ease, transform 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
+}
+#sessionPanel.clean-ui {
+  opacity: 0.2;
+  transform: scale(0.9);
+  background: rgba(255,255,255,0.35);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+}
+#sessionPanel label { font-size: 14px; }
+#sessionPanel .row { margin-top: 8px; }
+#titleOverlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 20;
+  opacity: 0;
+  transition: opacity 1.2s ease;
+}
+#titleOverlay.show {
+  opacity: 1;
+}
+#titleOverlay.hide {
+  opacity: 0;
+}
+#titleCard {
+  text-align: center;
+  color: rgba(255,255,255,0.96);
+  text-shadow: 0 6px 20px rgba(70,80,130,0.22);
+}
+#titleCard .title {
+  font-size: clamp(48px, 9vw, 110px);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  line-height: 0.95;
+}
+#titleCard .subtitle {
+  margin-top: 10px;
+  font-size: clamp(16px, 2vw, 24px);
+  font-weight: 600;
+  color: rgba(255,255,255,0.88);
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<button id="finishBtn"><span class="big">I feel</span><span class="small">better</span></button>
+<div id="titleOverlay">
+  <div id="titleCard">
+    <div class="title">Boom Therapy</div>
+    <div class="subtitle">Click. Breathe. Thoomp.</div>
+  </div>
+</div>
+<div id="sessionPanel">
+  <label>Volume <input id="volumeSlider" type="range" min="0" max="100" value="80"></label>
+  <div class="row"><label><input id="windToggle" type="checkbox"> Chaotic gusts</label></div>
+  <div class="row"><label><input id="bloomToggle" type="checkbox"> Bloom targets</label></div>
+  <div class="row"><label><input id="cleanToggle" type="checkbox"> Clean UI</label></div>
+  <div class="row" style="font-size:12px; color:#4b587a;" id="soundStatus">Sound ready: click to awaken the cannon</div>
+  <div class="row" style="font-size:12px; color:#4b587a;" id="scoreStatus">Calm points: 0</div>
+</div>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const volumeSlider = document.getElementById('volumeSlider');
+const windToggle = document.getElementById('windToggle');
+const finishBtn = document.getElementById('finishBtn');
+const soundStatus = document.getElementById('soundStatus');
+const bloomToggle = document.getElementById('bloomToggle');
+const scoreStatus = document.getElementById('scoreStatus');
+const cleanToggle = document.getElementById('cleanToggle');
+const sessionPanel = document.getElementById('sessionPanel');
+const titleOverlay = document.getElementById('titleOverlay');
+
+let w, h;
+function resize() {
+  w = canvas.width = window.innerWidth;
+  h = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+let projectiles = [];
+let targets = [];
+let particles = [];
+let cloudWords = [];
+let audioCtx = null;
+let wind = 0;
+let gustTarget = 0;
+let gustTimer = 0;
+let fade = 1;
+let fading = false;
+let targetSpawnTimer = 0;
+let wordSpawnTimer = 0;
+let score = 0;
+let cleanUI = false;
+let sessionPaused = false;
+let statusResetTimer = null;
+let lastAngle = -Math.PI/2; // default aim upwards
+let recoil = 0;
+let muzzleFlash = 0;
+let titleSequenceStarted = false;
+
+function rand(min, max) {
+  return Math.random() * (max - min) + min;
+}
+
+function ensureAudio() {
+  if (volumeSlider.value === '0') return null;
+  if (!audioCtx) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    audioCtx = new AudioCtx();
+  }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  soundStatus.textContent = 'Sound armed: thoomp and pop enabled';
+  return audioCtx;
+}
+
+function playBoom(freq = 80, duration = 0.12, punch = 1) {
+  const ac = ensureAudio();
+  if (!ac) return;
+
+  const now = ac.currentTime;
+  const vol = Number(volumeSlider.value) / 100;
+  const gainBoost = 0.24 * vol * punch;
+
+  const master = ac.createGain();
+  master.gain.setValueAtTime(0.0001, now);
+  master.gain.exponentialRampToValueAtTime(Math.max(0.0001, gainBoost), now + 0.01);
+  master.gain.exponentialRampToValueAtTime(0.0001, now + duration + 0.08);
+  master.connect(ac.destination);
+
+  const low = ac.createOscillator();
+  low.type = 'triangle';
+  low.frequency.setValueAtTime(freq, now);
+  low.frequency.exponentialRampToValueAtTime(Math.max(28, freq * 0.42), now + duration);
+
+  const crack = ac.createOscillator();
+  crack.type = 'square';
+  crack.frequency.setValueAtTime(freq * 2.3, now);
+  crack.frequency.exponentialRampToValueAtTime(Math.max(60, freq * 0.9), now + duration * 0.65);
+
+  const lowGain = ac.createGain();
+  lowGain.gain.setValueAtTime(0.9, now);
+  lowGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+  const crackGain = ac.createGain();
+  crackGain.gain.setValueAtTime(0.18, now);
+  crackGain.gain.exponentialRampToValueAtTime(0.001, now + duration * 0.4);
+
+  const lowPass = ac.createBiquadFilter();
+  lowPass.type = 'lowpass';
+  lowPass.frequency.setValueAtTime(950, now);
+
+  low.connect(lowGain);
+  crack.connect(crackGain);
+  lowGain.connect(lowPass);
+  crackGain.connect(lowPass);
+  lowPass.connect(master);
+
+  low.start(now);
+  crack.start(now);
+  low.stop(now + duration + 0.02);
+  crack.stop(now + duration * 0.45 + 0.02);
+}
+
+function playBounce() {
+  const ac = ensureAudio();
+  if (!ac) return;
+  const now = ac.currentTime;
+  const vol = Number(volumeSlider.value) / 100;
+
+  const osc = ac.createOscillator();
+  const gain = ac.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(180, now);
+  osc.frequency.exponentialRampToValueAtTime(110, now + 0.05);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.045 * vol, now + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+  osc.connect(gain);
+  gain.connect(ac.destination);
+  osc.start(now);
+  osc.stop(now + 0.1);
+}
+
+function playPop() {
+  const ac = ensureAudio();
+  if (!ac) return;
+  const now = ac.currentTime;
+  const vol = Number(volumeSlider.value) / 100;
+
+  // Softer, bassier "pop" (less digital)
+  const osc = ac.createOscillator();
+  const gain = ac.createGain();
+  const lowpass = ac.createBiquadFilter();
+
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(180, now);
+  osc.frequency.exponentialRampToValueAtTime(70, now + 0.12);
+
+  lowpass.type = 'lowpass';
+  lowpass.frequency.setValueAtTime(600, now);
+
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.12 * vol, now + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+
+  osc.connect(lowpass);
+  lowpass.connect(gain);
+  gain.connect(ac.destination);
+
+  osc.start(now);
+  osc.stop(now + 0.18);
+}
+
+function fire(x, y) {
+  if (fading) return;
+  ensureAudio();
+
+  const startX = w / 2;
+  const startY = h - 50;
+  const dx = x - startX;
+  const dy = y - startY;
+  const angle = Math.atan2(dy, dx);
+  lastAngle = angle; // remember aim direction
+
+  // Scale launch speed with viewport height so tall windows still allow high arcs.
+  const heightScale = Math.max(0.85, Math.min(1.35, h / 700));
+  const baseSpeed = 560 * heightScale;
+
+  // trigger cannon effects
+  recoil = 10;
+  muzzleFlash = 0.08;
+
+  playBoom(76, 0.16, 1.25);
+  projectiles.push({
+    x: startX,
+    y: startY,
+    vx: Math.cos(angle) * baseSpeed,
+    vy: Math.sin(angle) * baseSpeed,
+    trail: [],
+    bounced: false
+  });
+}
+
+function updateScore(delta) {
+  score += delta;
+  scoreStatus.textContent = `Calm points: ${score}`;
+}
+
+function spawnTarget(x = null, y = null, r = null, vx = null, c1 = null, c2 = null) {
+  const side = Math.random() < 0.5 ? -1 : 1;
+  const palette = [
+    ['#ffb86b', '#ffd8a8'],
+    ['#84e0c3', '#d6fff2'],
+    ['#9bb8ff', '#dbe5ff'],
+    ['#ff96c2', '#ffd9e9']
+  ];
+  const chosen = c1 && c2 ? [c1, c2] : palette[Math.floor(Math.random() * palette.length)];
+  targets.push({
+    x: x ?? (side < 0 ? -40 : w + 40),
+    y: y ?? rand(90, h * 0.55),
+    r: r ?? rand(18, 34),
+    vx: vx ?? rand(20, 48) * -side,
+    wobble: rand(0.6, 1.8),
+    wobbleAmp: rand(6, 18),
+    t: rand(0, 100),
+    c1: chosen[0],
+    c2: chosen[1],
+    hit: false
+  });
+}
+
+function explode(x, y, power = 1, colorSet = null) {
+  const colors = colorSet || ['#fff4a8', '#ffd17c', '#ff9ec5', '#cfd9ff', '#b8ffe6'];
+  const count = Math.floor(18 * power);
+  for (let i = 0; i < count; i++) {
+    const a = rand(0, Math.PI * 2);
+    const s = rand(40, 180) * power;
+    particles.push({
+      x,
+      y,
+      vx: Math.cos(a) * s,
+      vy: Math.sin(a) * s,
+      life: rand(0.55, 1.25),
+      maxLife: 1.25,
+      size: rand(2, 6),
+      color: colors[Math.floor(Math.random() * colors.length)]
+    });
+  }
+  playBoom(118, 0.1, 0.85);
+}
+
+canvas.onclick = (e) => {
+  if (sessionPaused) return;
+  fire(e.clientX, e.clientY);
+};
+
+function pickNewGust() {
+  gustTarget = rand(-520, 520);
+  gustTimer = rand(0.4, 1.4);
+}
+
+function applyCleanUI() {
+  sessionPanel.classList.toggle('clean-ui', cleanUI);
+  finishBtn.classList.toggle('clean-ui', cleanUI);
+  soundStatus.style.opacity = cleanUI ? '0.75' : '1';
+  scoreStatus.style.opacity = cleanUI ? '0.75' : '1';
+}
+
+function resetSession() {
+  projectiles = [];
+  targets = [];
+  particles = [];
+  cloudWords = [];
+  score = 0;
+  scoreStatus.textContent = 'Calm points: 0';
+  soundStatus.textContent = '...that helped.';
+  fade = 1;
+  fading = false;
+  sessionPaused = false;
+  finishBtn.innerHTML = '<span class="big">I feel</span><span class="small">better</span>';
+  targetSpawnTimer = 0.2;
+  wordSpawnTimer = 0.8;
+  pickNewGust();
+
+  if (statusResetTimer) {
+    clearTimeout(statusResetTimer);
+  }
+  statusResetTimer = setTimeout(() => {
+    soundStatus.textContent = audioCtx ? 'Sound armed: thoomp and pop enabled' : 'Sound ready: click to awaken the cannon';
+    statusResetTimer = null;
+  }, 1200);
+}
+
+finishBtn.onclick = () => {
+  if (fading) return;
+
+  if (!sessionPaused) {
+    sessionPaused = true;
+    finishBtn.innerHTML = '<span class="big">More</span><span class="small">therapy</span>';
+    soundStatus.textContent = 'Session paused. Breathe, or press for another round.';
+    return;
+  }
+
+  resetSession();
+  soundStatus.textContent = 'Fresh nonsense deployed.';
+};
+
+cleanToggle.onchange = () => {
+  cleanUI = cleanToggle.checked;
+  applyCleanUI();
+};
+
+window.addEventListener('blur', () => {
+  last = performance.now();
+});
+
+function update(dt) {
+  if (!Number.isFinite(dt) || dt < 0) return;
+  if (sessionPaused) return;
+
+  // decay cannon effects
+  recoil *= 0.9;
+  muzzleFlash -= dt;
+  if (muzzleFlash < 0) muzzleFlash = 0;
+  if (!Number.isFinite(dt) || dt < 0) return;
+  if (sessionPaused) return;
+  if (windToggle.checked) {
+    gustTimer -= dt;
+    if (gustTimer <= 0) pickNewGust();
+    const smoothing = 2.8;
+    wind += (gustTarget - wind) * Math.min(1, dt * smoothing);
+  } else {
+    gustTarget = 0;
+    wind += (0 - wind) * Math.min(1, dt * 4.5);
+  }
+
+  if (fading) {
+    fade -= dt * 1.2;
+    if (fade <= 0) {
+      fade = 0;
+      fading = false;
+      setTimeout(() => {
+        resetSession();
+      }, 500);
+    }
+  }
+
+  if (!fading) {
+    targetSpawnTimer -= dt;
+    if (targetSpawnTimer <= 0) {
+      spawnTarget();
+      targetSpawnTimer = rand(1.0, 2.1);
+    }
+
+    wordSpawnTimer -= dt;
+    if (wordSpawnTimer <= 0 && cloudWords.length < 3) {
+      spawnCloudWord();
+      wordSpawnTimer = rand(2.6, 4.8);
+    }
+  }
+
+  targets.forEach(t => {
+    t.t += dt;
+    t.x += t.vx * dt;
+    t.y += Math.sin(t.t * t.wobble) * t.wobbleAmp * dt;
+  });
+  targets = targets.filter(t => !t.hit && t.x > -100 && t.x < w + 100);
+
+  // Slightly stronger gravity to keep arcs gentle
+  // Slightly reduced gravity for longer, floatier arcs
+  const gravity = 260;
+  projectiles.forEach(p => {
+    p.vx += wind * dt;
+    p.vy += gravity * dt;
+    p.vx *= 0.999;
+    p.vy *= 0.999;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+
+    if (!p.bounced && p.y >= h - 72) {
+      p.bounced = true;
+      playBounce();
+    }
+
+    for (const t of targets) {
+      const dx = p.x - t.x;
+      const dy = p.y - t.y;
+      const hitDist = p.r ? p.r + t.r : 6 + t.r;
+      if (dx * dx + dy * dy <= hitDist * hitDist) {
+        t.hit = true;
+        p.hit = true;
+        explode(t.x, t.y, 1, [t.c1, t.c2, '#ffffff']);
+        setTimeout(() => playPop(), 40);
+        updateScore(10);
+
+        if (bloomToggle.checked && t.r > 16) {
+          for (let i = 0; i < 2; i++) {
+            const angle = rand(0, Math.PI * 2);
+            const nr = t.r * 0.58;
+            spawnTarget(
+              t.x + Math.cos(angle) * 10,
+              t.y + Math.sin(angle) * 10,
+              nr,
+              rand(-55, 55),
+              t.c1,
+              t.c2
+            );
+          }
+        }
+        break;
+      }
+    }
+
+    p.trail.push({ x: p.x, y: p.y });
+    if (p.trail.length > 14) p.trail.shift();
+  });
+
+  projectiles = projectiles.filter(p => !p.hit && p.x > -120 && p.x < w + 120 && p.y < h + 120);
+
+  particles.forEach(pt => {
+    pt.life -= dt;
+    pt.x += pt.vx * dt;
+    pt.y += pt.vy * dt;
+    pt.vx *= 0.985;
+    pt.vy = pt.vy * 0.985 + 14 * dt;
+  });
+  particles = particles.filter(pt => pt.life > 0);
+
+  cloudWords.forEach(word => {
+    word.life -= dt;
+    word.x += word.vx * dt;
+    word.y += word.vy * dt;
+  });
+  cloudWords = cloudWords.filter(word => word.life > 0);
+}
+
+function drawSky() {
+  const t = performance.now() * 0.00012;
+  const topR = Math.round(228 + Math.sin(t) * 18);
+  const topG = Math.round(240 + Math.sin(t + 1.1) * 20);
+  const topB = Math.round(255 - Math.sin(t + 0.4) * 10);
+  const botR = Math.round(255 - Math.sin(t + 2.2) * 14);
+  const botG = Math.round(228 + Math.sin(t + 0.6) * 18);
+  const botB = 255;
+
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, `rgb(${topR},${topG},${topB})`);
+  g.addColorStop(1, `rgb(${botR},${botG},${botB})`);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.fillStyle = '#c7e1c8';
+  ctx.fillRect(0, h - 70, w, 70);
+}
+
+function drawCannon() {
+  ctx.save();
+  ctx.translate(w / 2, h - 50);
+
+  // solid base (partially enclosing pivot)
+  ctx.fillStyle = '#3e4762';
+  ctx.fillRect(-32, 2, 64, 26);
+
+  // pivot
+  ctx.fillStyle = '#4a536f';
+  ctx.beginPath();
+  ctx.arc(0, 0, 10, 0, Math.PI * 2);
+  ctx.fill();
+
+  // rotate and apply recoil
+  ctx.rotate(lastAngle);
+  ctx.translate(-recoil, 0);
+
+  // barrel
+  ctx.fillStyle = '#5d6787';
+  ctx.fillRect(0, -6, 48, 12);
+
+  // muzzle
+  ctx.fillStyle = '#2a2f44';
+  ctx.beginPath();
+  ctx.arc(48, 0, 6, 0, Math.PI * 2);
+  ctx.fill();
+
+  // muzzle flash
+  if (muzzleFlash > 0) {
+    ctx.globalAlpha = muzzleFlash * 4;
+    ctx.fillStyle = '#fff4a8';
+    ctx.beginPath();
+    ctx.arc(54, 0, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.restore();
+}
+
+function drawProjectiles() {
+  projectiles.forEach(p => {
+    p.trail.forEach((t, i) => {
+      ctx.fillStyle = `rgba(255,255,255,${(i + 1) / p.trail.length * 0.22})`;
+      ctx.beginPath();
+      ctx.arc(t.x, t.y, 2 + i * 0.08, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    ctx.fillStyle = '#1f2940';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+function drawTargets() {
+  targets.forEach(t => {
+    const g = ctx.createRadialGradient(t.x - t.r * 0.3, t.y - t.r * 0.35, 3, t.x, t.y, t.r * 1.2);
+    g.addColorStop(0, t.c2);
+    g.addColorStop(1, t.c1);
+
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, t.r, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, t.r * 0.55, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+}
+
+function drawParticles() {
+  particles.forEach(pt => {
+    ctx.globalAlpha = Math.max(0, pt.life / pt.maxLife);
+    ctx.fillStyle = pt.color;
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+}
+
+function spawnCloudWord() {
+  const words = [
+    'I\'m fine',
+    'Ponies',
+    'It\'s fine',
+    'Sunbeams',
+    'All good',
+    'Warm',
+    'Plenty of time for everything',
+    'Chocolate',
+    'No pressure at all',
+    'Hugs',
+    'Calm',
+    'French fries',
+    'Ice cream',
+    'Long weekends',
+    'Warm blanket',
+    'Serene',
+    'Placid',
+    'Breath',
+    'I am coping',
+    'Milkshakes',
+    'Sticky date pudding',
+    'Custard',
+    'Fudge',
+    'Trifle',
+    'Gelato',
+    'Golden',
+    'Smooth',
+    'Doughnuts',
+    'Pandas',
+    'Koalas',
+    'Unicorns'
+  ];
+  cloudWords.push({
+    text: words[Math.floor(Math.random() * words.length)],
+    x: rand(80, w - 180),
+    y: rand(70, Math.max(90, h * 0.35)),
+    vx: rand(-8, 8),
+    vy: rand(-2, 2),
+    life: 5.2,
+    maxLife: 5.2,
+    size: rand(60, 110)
+  });
+}
+
+function drawCloudWords() {
+  cloudWords.forEach(word => {
+    const fadeIn = Math.min(1, (word.maxLife - word.life) / 1.4);
+    const fadeOut = Math.min(1, word.life / 1.6);
+    const alpha = Math.min(fadeIn, fadeOut) * 0.55; // more visible across sky
+
+    ctx.globalAlpha = alpha;
+
+    // calmer rounded font + stronger readability
+    ctx.font = `600 ${word.size}px Nunito, Inter, Arial, sans-serif`;
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // subtle stroke for contrast against changing sky
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(60,70,100,0.25)';
+    ctx.strokeText(word.text, word.x, word.y);
+
+    // soft fill
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.fillText(word.text, word.x, word.y);
+
+    ctx.shadowBlur = 0;
+  });
+
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'start';
+  ctx.textBaseline = 'alphabetic';
+}
+
+function drawWindIndicator() {
+  if (!windToggle.checked) return;
+  const dir = wind >= 0 ? 1 : -1;
+  const mag = Math.abs(wind);
+
+  ctx.fillStyle = 'rgba(31,41,64,0.72)';
+  ctx.font = 'bold 16px Inter, Arial, sans-serif';
+  ctx.fillText(`Wind ${dir > 0 ? '→' : '←'} ${Math.round(mag)}`, 20, 28);
+
+  for (let i = 0; i < 8; i++) {
+    const y = 44 + i * 14;
+    const len = Math.max(35, mag * 0.14);
+    ctx.strokeStyle = 'rgba(31,41,64,0.28)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(20, y);
+    ctx.lineTo(20 + dir * len, y);
+    ctx.stroke();
+  }
+}
+
+function drawFade() {
+  if (fade >= 1) return;
+  ctx.fillStyle = `rgba(255,255,255,${1 - fade})`;
+  ctx.fillRect(0, 0, w, h);
+}
+
+function draw() {
+  ctx.clearRect(0, 0, w, h);
+  drawSky();
+  drawWindIndicator();
+  drawTargets();
+  drawProjectiles();
+  drawParticles();
+  drawCloudWords();
+  drawCannon();
+  drawFade();
+}
+
+function startTitleSequence() {
+  if (titleSequenceStarted) return;
+  titleSequenceStarted = true;
+
+  requestAnimationFrame(() => {
+    titleOverlay.classList.add('show');
+
+    setTimeout(() => {
+      titleOverlay.classList.remove('show');
+      titleOverlay.classList.add('hide');
+    }, 1800);
+
+    setTimeout(() => {
+      titleOverlay.style.display = 'none';
+    }, 3200);
+  });
+}
+
+function runTests() {
+  console.assert(typeof rand(0, 1) === 'number', 'rand should return a number');
+  pickNewGust();
+  console.assert(gustTarget >= -520 && gustTarget <= 520, 'gust target should be in range');
+  windToggle.checked = false;
+  update(0.016);
+  console.assert(Number.isFinite(wind), 'wind should be finite');
+  console.assert(typeof playBoom === 'function', 'playBoom should exist');
+  console.assert(typeof playBounce === 'function', 'playBounce should exist');
+  console.assert(typeof playPop === 'function', 'playPop should exist');
+  const beforeTargets = targets.length;
+  spawnTarget();
+  console.assert(targets.length === beforeTargets + 1, 'spawnTarget should add a target');
+  const beforeParticles = particles.length;
+  explode(100, 100, 1);
+  console.assert(particles.length > beforeParticles, 'explode should add particles');
+  const beforeCloudWords = cloudWords.length;
+  spawnCloudWord();
+  console.assert(cloudWords.length === beforeCloudWords + 1, 'spawnCloudWord should add a cloud word');
+  const oldFade = fade;
+  fade = 0.5;
+  drawFade();
+  fade = oldFade;
+  console.assert(true, 'fade overlay should draw without error');
+  sessionPaused = true;
+  update(0.016);
+  console.assert(sessionPaused === true, 'session can pause without crashing');
+  sessionPaused = false;
+  resetSession();
+}
+
+let last = 0;
+function loop(t) {
+  try {
+    const dt = Math.min(0.033, (t - last) / 1000 || 0);
+    last = t;
+    update(dt);
+    draw();
+  } catch (err) {
+    console.error('Boom Therapy loop error:', err);
+    soundStatus.textContent = 'Tiny hiccup detected. Press More therapy to reset.';
+    sessionPaused = true;
+    finishBtn.innerHTML = '<span class="big">More</span><span class="small">therapy</span>';
+  }
+  requestAnimationFrame(loop);
+}
+
+pickNewGust();
+applyCleanUI();
+runTests();
+startTitleSequence();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
