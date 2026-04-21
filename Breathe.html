@@ -1,0 +1,538 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Slider } from "@/components/ui/slider";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Progress } from "@/components/ui/progress";
+import { Play, Pause, RotateCcw, Wind, MoonStar, Waves } from "lucide-react";
+
+const PHRASES = [
+  "Please breathe in calmly. No need to minute this.",
+  "Exhale gently. The briefing can wait.",
+  "Hold… like a draft awaiting approval.",
+  "Breathe in. Stakeholders are aligned. Mostly.",
+  "Exhale. That email did not need 14 recipients.",
+  "Inhale confidence. Park the action items.",
+  "Hold. We are forming a small working group.",
+  "Exhale. The working group has been noted.",
+  "Breathe in. This is now a priority.",
+  "Exhale. It was always a priority.",
+  "Hold… pending further advice.",
+  "Inhale. The timeline is ambitious yet achievable.",
+  "Exhale. Adjust expectations accordingly.",
+  "Breathe in. The paper is being refined.",
+  "Exhale. The paper is being refined again.",
+  "Hold. Circulate for comment.",
+  "Inhale. Feedback has been incorporated.",
+  "Exhale. Feedback will be incorporated.",
+  "Breathe in. We’re taking a strategic pause.",
+  "Exhale. The pause has been extended.",
+  "Hold… awaiting ministerial direction.",
+  "Inhale. This aligns with government priorities.",
+  "Exhale. It always did.",
+  "Breathe in. A draft will be provided shortly.",
+  "Exhale. ‘Shortly’ is a flexible concept.",
+  "Hold. Let’s not rush to a sensible conclusion.",
+  "Inhale. The optics are favourable.",
+  "Exhale. The optics are being managed.",
+  "Breathe in. Noted for future consideration.",
+  "Exhale. Future consideration has arrived.",
+];
+
+const STAGES = {
+  inhale: {
+    label: "Breathe in",
+    color: "from-sky-400 to-cyan-300",
+    scale: 1,
+    glow: "0 0 120px rgba(56,189,248,0.6), 0 0 200px rgba(103,232,249,0.4)",
+  },
+  holdIn: {
+    label: "Hold",
+    color: "from-violet-400 to-fuchsia-300",
+    scale: 1,
+    glow: "0 0 100px rgba(167,139,250,0.6), 0 0 180px rgba(217,70,239,0.35)",
+  },
+  exhale: {
+    label: "Breathe out",
+    color: "from-emerald-400 to-teal-300",
+    scale: 0.72,
+    glow: "0 0 80px rgba(16,185,129,0.5), 0 0 140px rgba(20,184,166,0.3)",
+  },
+  holdOut: {
+    label: "Pause",
+    color: "from-amber-300 to-orange-300",
+    scale: 0.72,
+    glow: "0 0 70px rgba(251,191,36,0.45), 0 0 120px rgba(249,115,22,0.25)",
+  },
+};
+
+const DEFAULTS = {
+  inhale: 4,
+  holdIn: 4,
+  exhale: 4,
+  holdOut: 4,
+  showHoldOut: true,
+  autoRotatePhrases: true,
+  cyclesTarget: 8,
+};
+
+export function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+export function stageSequence(showHoldOut) {
+  return showHoldOut
+    ? ["inhale", "holdIn", "exhale", "holdOut"]
+    : ["inhale", "holdIn", "exhale"];
+}
+
+export function totalCycleSeconds(settings) {
+  return (
+    settings.inhale +
+    settings.holdIn +
+    settings.exhale +
+    (settings.showHoldOut ? settings.holdOut : 0)
+  );
+}
+
+export function cycleRemaining(activeSettings, activeSequence, stageIdx, secsLeftNow) {
+  let remaining = secsLeftNow;
+  for (let i = stageIdx + 1; i < activeSequence.length; i += 1) {
+    remaining += activeSettings[activeSequence[i]];
+  }
+  return remaining;
+}
+
+const SELF_TESTS = [
+  {
+    name: "stageSequence includes holdOut when enabled",
+    pass:
+      JSON.stringify(stageSequence(true)) ===
+      JSON.stringify(["inhale", "holdIn", "exhale", "holdOut"]),
+  },
+  {
+    name: "stageSequence omits holdOut when disabled",
+    pass:
+      JSON.stringify(stageSequence(false)) ===
+      JSON.stringify(["inhale", "holdIn", "exhale"]),
+  },
+  {
+    name: "totalCycleSeconds sums all enabled phases",
+    pass:
+      totalCycleSeconds({ inhale: 4, holdIn: 4, exhale: 4, holdOut: 4, showHoldOut: true }) === 16,
+  },
+  {
+    name: "totalCycleSeconds ignores holdOut when disabled",
+    pass:
+      totalCycleSeconds({ inhale: 4, holdIn: 4, exhale: 6, holdOut: 9, showHoldOut: false }) === 14,
+  },
+  {
+    name: "cycleRemaining counts current and future stages",
+    pass:
+      cycleRemaining(
+        { inhale: 4, holdIn: 4, exhale: 4, holdOut: 4 },
+        ["inhale", "holdIn", "exhale", "holdOut"],
+        1,
+        2,
+      ) === 10,
+  },
+  {
+    name: "clamp keeps values in range",
+    pass: clamp(12, 1, 10) === 10 && clamp(-2, 1, 10) === 1 && clamp(5, 1, 10) === 5,
+  },
+];
+
+function useGentleBeep(enabled) {
+  const ctxRef = useRef(null);
+
+  return () => {
+    if (!enabled || typeof window === "undefined") return;
+
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return;
+      if (!ctxRef.current) ctxRef.current = new AudioContextClass();
+
+      const ctx = ctxRef.current;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = "sine";
+      osc.frequency.value = 660;
+      gain.gain.value = 0.0001;
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      const now = ctx.currentTime;
+      gain.gain.exponentialRampToValueAtTime(0.03, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+      osc.start(now);
+      osc.stop(now + 0.18);
+    } catch (e) {
+      // Ignore browser audio issues.
+    }
+  };
+}
+
+export default function BreathingApp() {
+  const [settings, setSettings] = useState(DEFAULTS);
+  const [isRunning, setIsRunning] = useState(false);
+  const [currentStageIndex, setCurrentStageIndex] = useState(0);
+  const [secondsLeft, setSecondsLeft] = useState(DEFAULTS.inhale);
+  const [completedCycles, setCompletedCycles] = useState(0);
+  const [phraseIndex, setPhraseIndex] = useState(0);
+  const [soundOn, setSoundOn] = useState(false);
+
+  const sequence = useMemo(() => stageSequence(settings.showHoldOut), [settings.showHoldOut]);
+  const currentStage = sequence[currentStageIndex] ?? sequence[0];
+  const currentStageDuration = settings[currentStage] ?? settings.inhale;
+  const cycleTotal = totalCycleSeconds(settings);
+  const remaining = cycleRemaining(settings, sequence, currentStageIndex, secondsLeft);
+  const cycleProgress = cycleTotal > 0 ? ((cycleTotal - remaining) / cycleTotal) * 100 : 0;
+  const targetProgress = settings.cyclesTarget > 0 ? (completedCycles / settings.cyclesTarget) * 100 : 0;
+  const beep = useGentleBeep(soundOn);
+  const phase = STAGES[currentStage];
+
+  const resetSession = () => {
+    setIsRunning(false);
+    setCurrentStageIndex(0);
+    setSecondsLeft(settings.inhale);
+    setCompletedCycles(0);
+  };
+
+  const moveToNextStage = () => {
+    const nextIndex = currentStageIndex + 1;
+
+    if (nextIndex >= sequence.length) {
+      setCompletedCycles((prev) => prev + 1);
+      setCurrentStageIndex(0);
+      setSecondsLeft(settings[sequence[0]]);
+      beep();
+      return;
+    }
+
+    setCurrentStageIndex(nextIndex);
+    setSecondsLeft(settings[sequence[nextIndex]]);
+    beep();
+  };
+
+  useEffect(() => {
+    if (!isRunning) return undefined;
+
+    const timer = setInterval(() => {
+      setSecondsLeft((prev) => {
+        if (prev > 1) return prev - 1;
+        return 0;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [isRunning, currentStage]);
+
+  useEffect(() => {
+    if (!isRunning) return;
+    if (secondsLeft === 0) moveToNextStage();
+  }, [secondsLeft, isRunning]);
+
+  useEffect(() => {
+    if (!settings.autoRotatePhrases) return undefined;
+
+    const phraseTimer = setInterval(() => {
+      setPhraseIndex((prev) => (prev + 1) % PHRASES.length);
+    }, 4200);
+
+    return () => clearInterval(phraseTimer);
+  }, [settings.autoRotatePhrases]);
+
+  useEffect(() => {
+    if (completedCycles >= settings.cyclesTarget && settings.cyclesTarget > 0) {
+      setIsRunning(false);
+    }
+  }, [completedCycles, settings.cyclesTarget]);
+
+  useEffect(() => {
+    setCurrentStageIndex(0);
+    setSecondsLeft(settings.inhale);
+  }, [settings.showHoldOut]);
+
+  useEffect(() => {
+    if (!isRunning) {
+      setSecondsLeft(settings[currentStage] ?? settings.inhale);
+    }
+  }, [settings.inhale, settings.holdIn, settings.exhale, settings.holdOut, currentStage, isRunning]);
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-white overflow-hidden relative">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.18),transparent_35%),radial-gradient(circle_at_bottom,rgba(167,139,250,0.15),transparent_30%),linear-gradient(to_bottom,#020617,#0f172a)]" />
+
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        {[...Array(9)].map((_, i) => (
+          <motion.div
+            key={i}
+            className="absolute rounded-full bg-white/5 blur-3xl"
+            style={{
+              width: `${120 + i * 22}px`,
+              height: `${120 + i * 22}px`,
+              left: `${(i * 13) % 88}%`,
+              top: `${(i * 11) % 84}%`,
+            }}
+            animate={{
+              y: [0, -18, 0],
+              x: [0, 12, 0],
+              opacity: [0.18, 0.26, 0.18],
+            }}
+            transition={{
+              duration: 10 + i,
+              repeat: Infinity,
+              ease: "easeInOut",
+            }}
+          />
+        ))}
+      </div>
+
+      <div className="relative z-10 max-w-7xl mx-auto p-6 lg:p-10">
+        <div className="grid lg:grid-cols-[260px_1fr] gap-6 items-stretch">
+          <Card className="bg-white/10 border-white/15 backdrop-blur-xl shadow-2xl rounded-3xl text-white">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-2xl">
+                <Wind className="w-6 h-6" />
+                Breathing Studio
+              </CardTitle>
+              <p className="text-sm text-white/85">
+                Tune the rhythm, start the circle, let your brain stop juggling cutlery.
+              </p>
+            </CardHeader>
+
+            <CardContent className="space-y-6">
+              <DurationControl
+                label="Breathe in"
+                value={settings.inhale}
+                onChange={(value) => setSettings((s) => ({ ...s, inhale: value }))}
+              />
+
+              <DurationControl
+                label="Hold"
+                value={settings.holdIn}
+                onChange={(value) => setSettings((s) => ({ ...s, holdIn: value }))}
+              />
+
+              <DurationControl
+                label="Breathe out"
+                value={settings.exhale}
+                onChange={(value) => setSettings((s) => ({ ...s, exhale: value }))}
+              />
+
+              <div className="space-y-3 rounded-2xl bg-white/7 p-4 border border-white/10">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <Label className="text-sm text-white/95">Include pause after exhale</Label>
+                    <p className="text-xs text-white/80 mt-1">Nice for box breathing and extra calm.</p>
+                  </div>
+                  <Switch
+                    checked={settings.showHoldOut}
+                    onCheckedChange={(checked) => setSettings((s) => ({ ...s, showHoldOut: checked }))}
+                  />
+                </div>
+
+                <AnimatePresence initial={false}>
+                  {settings.showHoldOut && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                    >
+                      <DurationControl
+                        label="Pause"
+                        value={settings.holdOut}
+                        onChange={(value) => setSettings((s) => ({ ...s, holdOut: value }))}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              <DurationControl
+                label="Target cycles"
+                value={settings.cyclesTarget}
+                min={1}
+                max={20}
+                onChange={(value) => setSettings((s) => ({ ...s, cyclesTarget: value }))}
+              />
+
+              <div className="grid grid-cols-1 gap-3">
+                <ToggleRow
+                  icon={<MoonStar className="w-4 h-4" />}
+                  label="Soft chime"
+                  checked={soundOn}
+                  onCheckedChange={setSoundOn}
+                />
+                <ToggleRow
+                  icon={<Waves className="w-4 h-4" />}
+                  label="Floating thoughts"
+                  checked={settings.autoRotatePhrases}
+                  onCheckedChange={(checked) => setSettings((s) => ({ ...s, autoRotatePhrases: checked }))}
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <Button className="flex-1 rounded-2xl" onClick={() => setIsRunning((v) => !v)}>
+                  {isRunning ? <Pause className="w-4 h-4 mr-2" /> : <Play className="w-4 h-4 mr-2" />}
+                  {isRunning ? "Pause" : "Start"}
+                </Button>
+
+                <Button
+                  variant="secondary"
+                  className="rounded-2xl bg-white/10 hover:bg-white/20 text-white border border-white/10"
+                  onClick={resetSession}
+                >
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  Reset
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="space-y-6 h-full">
+            <Card className="bg-white/6 border-white/10 backdrop-blur-xl rounded-3xl shadow-2xl min-h-[720px] h-full flex flex-col justify-between">
+              <CardContent className="p-6 lg:p-10 flex-1 flex flex-col">
+                <div className="flex-1 flex flex-col items-center justify-center relative py-10">
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={currentStage}
+                      initial={{ opacity: 0.85, scale: 0.85 }}
+                      animate={{ opacity: 1, scale: phase.scale }}
+                      transition={{
+                        duration: clamp(currentStageDuration, 1, 12),
+                        ease: "easeInOut",
+                      }}
+                      className={`relative w-[320px] h-[320px] md:w-[380px] md:h-[380px] rounded-full bg-gradient-to-br ${phase.color} flex items-center justify-center`}
+                      style={{ boxShadow: phase.glow }}
+                    >
+                      <motion.div
+                        className="absolute inset-6 rounded-full border border-white/30"
+                        animate={{
+                          opacity: [0.2, 0.6, 0.2],
+                          scale:
+                            currentStage === "inhale"
+                              ? [0.95, 1.08, 0.95]
+                              : currentStage === "exhale"
+                                ? [1.05, 0.9, 1.05]
+                                : [0.98, 1.03, 0.98],
+                        }}
+                        transition={{ duration: 2.8, repeat: Infinity, ease: "easeInOut" }}
+                      />
+
+                      <motion.div
+                        className="absolute inset-14 rounded-full border border-white/25"
+                        animate={{
+                          opacity: [0.1, 0.4, 0.1],
+                          scale:
+                            currentStage === "inhale"
+                              ? [0.97, 1.05, 0.97]
+                              : currentStage === "exhale"
+                                ? [1.03, 0.92, 1.03]
+                                : [0.99, 1.02, 0.99],
+                        }}
+                        transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
+                      />
+
+                      <div className="text-center z-10 px-6">
+                        <div className="text-2xl md:text-3xl font-semibold uppercase tracking-[0.2em] text-white/95 drop-shadow-lg">
+                          {phase.label}
+                        </div>
+                        <div className="mt-4 text-7xl font-bold tabular-nums drop-shadow-lg">{secondsLeft}</div>
+                        <div className="mt-3 text-lg text-white/95">seconds</div>
+                      </div>
+                    </motion.div>
+                  </AnimatePresence>
+
+                  <div className="mt-6 text-center px-6 min-h-[3.5rem] flex items-center justify-center">
+                    <AnimatePresence mode="wait">
+                      {settings.autoRotatePhrases && (
+                        <motion.p
+                          key={phraseIndex}
+                          initial={{ opacity: 0, y: 12 }}
+                          animate={{ opacity: 0.65, y: 0 }}
+                          exit={{ opacity: 0, y: -12 }}
+                          transition={{ duration: 1.2 }}
+                          className="text-xl md:text-2xl font-medium tracking-wide text-white/90"
+                        >
+                          {PHRASES[phraseIndex]}
+                        </motion.p>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-3 mt-auto">
+                  <StatCard
+                    title="Cycle"
+                    value={`${completedCycles} / ${settings.cyclesTarget}`}
+                    sub="Completed rounds"
+                    progress={targetProgress}
+                  />
+                  <StatCard
+                    title="Pattern"
+                    value={`${settings.inhale}-${settings.holdIn}-${settings.exhale}${
+                      settings.showHoldOut ? `-${settings.holdOut}` : ""
+                    }`}
+                    sub="Seconds per phase"
+                    progress={cycleProgress}
+                  />
+                </div>
+
+                <div className="mt-4 text-[10px] text-white/35">
+                  {SELF_TESTS.every((test) => test.pass) ? "Logic checks passed." : "Logic checks failed."}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DurationControl({ label, value, onChange, min = 1, max = 12 }) {
+  return (
+    <div className="space-y-3 rounded-2xl bg-white/7 p-4 border border-white/10">
+      <div className="flex items-center justify-between gap-3">
+        <Label className="text-sm text-white/95">{label}</Label>
+        <span className="text-sm text-white/90 w-16 text-right font-medium">{value}s</span>
+      </div>
+      <Slider value={[value]} min={min} max={max} step={1} onValueChange={(vals) => onChange(vals[0])} />
+    </div>
+  );
+}
+
+function ToggleRow({ icon, label, checked, onCheckedChange }) {
+  return (
+    <div className="rounded-2xl bg-white/7 p-4 flex items-center justify-between gap-3 border border-white/10 min-w-0">
+      <div className="flex items-center gap-2 text-sm text-white/95 min-w-0 flex-1">
+        <span className="shrink-0">{icon}</span>
+        <span className="leading-snug break-words">{label}</span>
+      </div>
+      <div className="shrink-0 pl-3">
+        <Switch checked={checked} onCheckedChange={onCheckedChange} />
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ title, value, sub, progress }) {
+  return (
+    <div className="rounded-xl bg-white/7 p-3 border border-white/10 text-white">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-xs text-white/80">{title}</p>
+          <p className="text-lg font-semibold mt-1">{value}</p>
+          <p className="text-xs text-white/70 mt-1">{sub}</p>
+        </div>
+      </div>
+      <Progress value={clamp(progress, 0, 100)} className="mt-3 h-1.5 bg-white/10" />
+    </div>
+  );
+}
