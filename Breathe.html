@@ -778,6 +778,7 @@
     };
 
     const state = {
+      phrasesList: [...PHRASES],
       inhale: 4,
       holdIn: 4,
       exhale: 4,
@@ -939,7 +940,7 @@
         return;
       }
 
-      const text = PHRASES[state.phraseIndex % PHRASES.length];
+      const text = state.phrasesList[state.phraseIndex % state.phrasesList.length];
       el.phrase.classList.remove('show');
       el.phrase.textContent = text;
 
@@ -956,7 +957,7 @@
       renderPhrase(false);
       setTimeout(() => {
         renderPhrase(true);
-      }, 120);
+      }, 500);
     }
 
     function beep() {
@@ -984,6 +985,22 @@
     }
 
     function showCompletion() {
+      const messages = [
+        {
+          title: "Breathing complete. You are oxygenated.",
+          text: "Excellent work. Your lungs have filed a very positive report and your nervous system has been advised accordingly."
+        },
+        {
+          title: "Session complete. The lungs have delivered.",
+          text: "All systems are calmer. No further action required at this time, though ongoing breathing is encouraged."
+        }
+      ];
+
+      const chosen = messages[Math.floor(Math.random() * messages.length)];
+
+      document.querySelector('.completion-title').textContent = chosen.title;
+      document.querySelector('.completion-text').textContent = chosen.text;
+
       state.isComplete = true;
       pauseSession();
       el.circleShell.classList.add('hidden');
@@ -1004,7 +1021,7 @@
 
       if (nextIndex >= sequence.length) {
         state.completedCycles += 1;
-        state.phraseIndex = (state.phraseIndex + 1) % PHRASES.length;
+        state.phraseIndex = (state.phraseIndex + 1) % state.phrasesList.length;
         advancePhrase();
 
         if (state.completedCycles >= state.cyclesTarget && state.cyclesTarget > 0) {
@@ -1037,6 +1054,15 @@
       }
     }
 
+    function shuffleArray(arr) {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
     function startSession() {
       if (state.isRunning) return;
       if (state.isComplete) {
@@ -1048,6 +1074,7 @@
         state.currentStageIndex = 0;
         state.secondsLeft = state.inhale;
         state.phraseIndex = 0;
+        state.phrasesList = shuffleArray(PHRASES);
       }
       state.isRunning = true;
       clearInterval(state.timer);
