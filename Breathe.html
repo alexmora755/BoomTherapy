@@ -1,538 +1,1021 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Slider } from "@/components/ui/slider";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Progress } from "@/components/ui/progress";
-import { Play, Pause, RotateCcw, Wind, MoonStar, Waves } from "lucide-react";
-
-const PHRASES = [
-  "Please breathe in calmly. No need to minute this.",
-  "Exhale gently. The briefing can wait.",
-  "Hold… like a draft awaiting approval.",
-  "Breathe in. Stakeholders are aligned. Mostly.",
-  "Exhale. That email did not need 14 recipients.",
-  "Inhale confidence. Park the action items.",
-  "Hold. We are forming a small working group.",
-  "Exhale. The working group has been noted.",
-  "Breathe in. This is now a priority.",
-  "Exhale. It was always a priority.",
-  "Hold… pending further advice.",
-  "Inhale. The timeline is ambitious yet achievable.",
-  "Exhale. Adjust expectations accordingly.",
-  "Breathe in. The paper is being refined.",
-  "Exhale. The paper is being refined again.",
-  "Hold. Circulate for comment.",
-  "Inhale. Feedback has been incorporated.",
-  "Exhale. Feedback will be incorporated.",
-  "Breathe in. We’re taking a strategic pause.",
-  "Exhale. The pause has been extended.",
-  "Hold… awaiting ministerial direction.",
-  "Inhale. This aligns with government priorities.",
-  "Exhale. It always did.",
-  "Breathe in. A draft will be provided shortly.",
-  "Exhale. ‘Shortly’ is a flexible concept.",
-  "Hold. Let’s not rush to a sensible conclusion.",
-  "Inhale. The optics are favourable.",
-  "Exhale. The optics are being managed.",
-  "Breathe in. Noted for future consideration.",
-  "Exhale. Future consideration has arrived.",
-];
-
-const STAGES = {
-  inhale: {
-    label: "Breathe in",
-    color: "from-sky-400 to-cyan-300",
-    scale: 1,
-    glow: "0 0 120px rgba(56,189,248,0.6), 0 0 200px rgba(103,232,249,0.4)",
-  },
-  holdIn: {
-    label: "Hold",
-    color: "from-violet-400 to-fuchsia-300",
-    scale: 1,
-    glow: "0 0 100px rgba(167,139,250,0.6), 0 0 180px rgba(217,70,239,0.35)",
-  },
-  exhale: {
-    label: "Breathe out",
-    color: "from-emerald-400 to-teal-300",
-    scale: 0.72,
-    glow: "0 0 80px rgba(16,185,129,0.5), 0 0 140px rgba(20,184,166,0.3)",
-  },
-  holdOut: {
-    label: "Pause",
-    color: "from-amber-300 to-orange-300",
-    scale: 0.72,
-    glow: "0 0 70px rgba(251,191,36,0.45), 0 0 120px rgba(249,115,22,0.25)",
-  },
-};
-
-const DEFAULTS = {
-  inhale: 4,
-  holdIn: 4,
-  exhale: 4,
-  holdOut: 4,
-  showHoldOut: true,
-  autoRotatePhrases: true,
-  cyclesTarget: 8,
-};
-
-export function clamp(n, min, max) {
-  return Math.max(min, Math.min(max, n));
-}
-
-export function stageSequence(showHoldOut) {
-  return showHoldOut
-    ? ["inhale", "holdIn", "exhale", "holdOut"]
-    : ["inhale", "holdIn", "exhale"];
-}
-
-export function totalCycleSeconds(settings) {
-  return (
-    settings.inhale +
-    settings.holdIn +
-    settings.exhale +
-    (settings.showHoldOut ? settings.holdOut : 0)
-  );
-}
-
-export function cycleRemaining(activeSettings, activeSequence, stageIdx, secsLeftNow) {
-  let remaining = secsLeftNow;
-  for (let i = stageIdx + 1; i < activeSequence.length; i += 1) {
-    remaining += activeSettings[activeSequence[i]];
-  }
-  return remaining;
-}
-
-const SELF_TESTS = [
-  {
-    name: "stageSequence includes holdOut when enabled",
-    pass:
-      JSON.stringify(stageSequence(true)) ===
-      JSON.stringify(["inhale", "holdIn", "exhale", "holdOut"]),
-  },
-  {
-    name: "stageSequence omits holdOut when disabled",
-    pass:
-      JSON.stringify(stageSequence(false)) ===
-      JSON.stringify(["inhale", "holdIn", "exhale"]),
-  },
-  {
-    name: "totalCycleSeconds sums all enabled phases",
-    pass:
-      totalCycleSeconds({ inhale: 4, holdIn: 4, exhale: 4, holdOut: 4, showHoldOut: true }) === 16,
-  },
-  {
-    name: "totalCycleSeconds ignores holdOut when disabled",
-    pass:
-      totalCycleSeconds({ inhale: 4, holdIn: 4, exhale: 6, holdOut: 9, showHoldOut: false }) === 14,
-  },
-  {
-    name: "cycleRemaining counts current and future stages",
-    pass:
-      cycleRemaining(
-        { inhale: 4, holdIn: 4, exhale: 4, holdOut: 4 },
-        ["inhale", "holdIn", "exhale", "holdOut"],
-        1,
-        2,
-      ) === 10,
-  },
-  {
-    name: "clamp keeps values in range",
-    pass: clamp(12, 1, 10) === 10 && clamp(-2, 1, 10) === 1 && clamp(5, 1, 10) === 5,
-  },
-];
-
-function useGentleBeep(enabled) {
-  const ctxRef = useRef(null);
-
-  return () => {
-    if (!enabled || typeof window === "undefined") return;
-
-    try {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContextClass) return;
-      if (!ctxRef.current) ctxRef.current = new AudioContextClass();
-
-      const ctx = ctxRef.current;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = "sine";
-      osc.frequency.value = 660;
-      gain.gain.value = 0.0001;
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      const now = ctx.currentTime;
-      gain.gain.exponentialRampToValueAtTime(0.03, now + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
-      osc.start(now);
-      osc.stop(now + 0.18);
-    } catch (e) {
-      // Ignore browser audio issues.
-    }
-  };
-}
-
-export default function BreathingApp() {
-  const [settings, setSettings] = useState(DEFAULTS);
-  const [isRunning, setIsRunning] = useState(false);
-  const [currentStageIndex, setCurrentStageIndex] = useState(0);
-  const [secondsLeft, setSecondsLeft] = useState(DEFAULTS.inhale);
-  const [completedCycles, setCompletedCycles] = useState(0);
-  const [phraseIndex, setPhraseIndex] = useState(0);
-  const [soundOn, setSoundOn] = useState(false);
-
-  const sequence = useMemo(() => stageSequence(settings.showHoldOut), [settings.showHoldOut]);
-  const currentStage = sequence[currentStageIndex] ?? sequence[0];
-  const currentStageDuration = settings[currentStage] ?? settings.inhale;
-  const cycleTotal = totalCycleSeconds(settings);
-  const remaining = cycleRemaining(settings, sequence, currentStageIndex, secondsLeft);
-  const cycleProgress = cycleTotal > 0 ? ((cycleTotal - remaining) / cycleTotal) * 100 : 0;
-  const targetProgress = settings.cyclesTarget > 0 ? (completedCycles / settings.cyclesTarget) * 100 : 0;
-  const beep = useGentleBeep(soundOn);
-  const phase = STAGES[currentStage];
-
-  const resetSession = () => {
-    setIsRunning(false);
-    setCurrentStageIndex(0);
-    setSecondsLeft(settings.inhale);
-    setCompletedCycles(0);
-  };
-
-  const moveToNextStage = () => {
-    const nextIndex = currentStageIndex + 1;
-
-    if (nextIndex >= sequence.length) {
-      setCompletedCycles((prev) => prev + 1);
-      setCurrentStageIndex(0);
-      setSecondsLeft(settings[sequence[0]]);
-      beep();
-      return;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Breathing Studio</title>
+  <style>
+    :root {
+      --bg-top: rgba(56, 189, 248, 0.18);
+      --bg-bottom: rgba(167, 139, 250, 0.15);
+      --panel: rgba(255, 255, 255, 0.1);
+      --panel-soft: rgba(255, 255, 255, 0.07);
+      --panel-softer: rgba(255, 255, 255, 0.06);
+      --border: rgba(255, 255, 255, 0.1);
+      --text: rgba(255, 255, 255, 0.95);
+      --muted: rgba(255, 255, 255, 0.8);
+      --muted-2: rgba(255, 255, 255, 0.7);
+      --shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+      --phase-a: #38bdf8;
+      --phase-b: #67e8f9;
+      --circle-scale: 1;
+      --ring-1-scale: 1.03;
+      --ring-2-scale: 1.02;
+      --phrase-opacity: 0.65;
     }
 
-    setCurrentStageIndex(nextIndex);
-    setSecondsLeft(settings[sequence[nextIndex]]);
-    beep();
-  };
-
-  useEffect(() => {
-    if (!isRunning) return undefined;
-
-    const timer = setInterval(() => {
-      setSecondsLeft((prev) => {
-        if (prev > 1) return prev - 1;
-        return 0;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [isRunning, currentStage]);
-
-  useEffect(() => {
-    if (!isRunning) return;
-    if (secondsLeft === 0) moveToNextStage();
-  }, [secondsLeft, isRunning]);
-
-  useEffect(() => {
-    if (!settings.autoRotatePhrases) return undefined;
-
-    const phraseTimer = setInterval(() => {
-      setPhraseIndex((prev) => (prev + 1) % PHRASES.length);
-    }, 4200);
-
-    return () => clearInterval(phraseTimer);
-  }, [settings.autoRotatePhrases]);
-
-  useEffect(() => {
-    if (completedCycles >= settings.cyclesTarget && settings.cyclesTarget > 0) {
-      setIsRunning(false);
+    * {
+      box-sizing: border-box;
     }
-  }, [completedCycles, settings.cyclesTarget]);
 
-  useEffect(() => {
-    setCurrentStageIndex(0);
-    setSecondsLeft(settings.inhale);
-  }, [settings.showHoldOut]);
-
-  useEffect(() => {
-    if (!isRunning) {
-      setSecondsLeft(settings[currentStage] ?? settings.inhale);
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top, var(--bg-top), transparent 35%),
+        radial-gradient(circle at bottom, var(--bg-bottom), transparent 30%),
+        linear-gradient(to bottom, #020617, #0f172a);
+      overflow-x: hidden;
     }
-  }, [settings.inhale, settings.holdIn, settings.exhale, settings.holdOut, currentStage, isRunning]);
 
-  return (
-    <div className="min-h-screen bg-slate-950 text-white overflow-hidden relative">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.18),transparent_35%),radial-gradient(circle_at_bottom,rgba(167,139,250,0.15),transparent_30%),linear-gradient(to_bottom,#020617,#0f172a)]" />
+    .orbs {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+      z-index: 0;
+    }
 
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        {[...Array(9)].map((_, i) => (
-          <motion.div
-            key={i}
-            className="absolute rounded-full bg-white/5 blur-3xl"
-            style={{
-              width: `${120 + i * 22}px`,
-              height: `${120 + i * 22}px`,
-              left: `${(i * 13) % 88}%`,
-              top: `${(i * 11) % 84}%`,
-            }}
-            animate={{
-              y: [0, -18, 0],
-              x: [0, 12, 0],
-              opacity: [0.18, 0.26, 0.18],
-            }}
-            transition={{
-              duration: 10 + i,
-              repeat: Infinity,
-              ease: "easeInOut",
-            }}
-          />
-        ))}
-      </div>
+    .orb {
+      position: absolute;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.05);
+      filter: blur(48px);
+      animation: drift ease-in-out infinite;
+    }
 
-      <div className="relative z-10 max-w-7xl mx-auto p-6 lg:p-10">
-        <div className="grid lg:grid-cols-[260px_1fr] gap-6 items-stretch">
-          <Card className="bg-white/10 border-white/15 backdrop-blur-xl shadow-2xl rounded-3xl text-white">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-2xl">
-                <Wind className="w-6 h-6" />
-                Breathing Studio
-              </CardTitle>
-              <p className="text-sm text-white/85">
-                Tune the rhythm, start the circle, let your brain stop juggling cutlery.
-              </p>
-            </CardHeader>
+    @keyframes drift {
+      0%, 100% {
+        transform: translate(0, 0);
+        opacity: 0.18;
+      }
+      50% {
+        transform: translate(12px, -18px);
+        opacity: 0.26;
+      }
+    }
 
-            <CardContent className="space-y-6">
-              <DurationControl
-                label="Breathe in"
-                value={settings.inhale}
-                onChange={(value) => setSettings((s) => ({ ...s, inhale: value }))}
-              />
+    .app {
+      position: relative;
+      z-index: 1;
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 24px;
+    }
 
-              <DurationControl
-                label="Hold"
-                value={settings.holdIn}
-                onChange={(value) => setSettings((s) => ({ ...s, holdIn: value }))}
-              />
+    .layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 24px;
+      align-items: stretch;
+    }
 
-              <DurationControl
-                label="Breathe out"
-                value={settings.exhale}
-                onChange={(value) => setSettings((s) => ({ ...s, exhale: value }))}
-              />
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
 
-              <div className="space-y-3 rounded-2xl bg-white/7 p-4 border border-white/10">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <Label className="text-sm text-white/95">Include pause after exhale</Label>
-                    <p className="text-xs text-white/80 mt-1">Nice for box breathing and extra calm.</p>
-                  </div>
-                  <Switch
-                    checked={settings.showHoldOut}
-                    onCheckedChange={(checked) => setSettings((s) => ({ ...s, showHoldOut: checked }))}
-                  />
-                </div>
+    .left-card {
+      padding: 24px;
+    }
 
-                <AnimatePresence initial={false}>
-                  {settings.showHoldOut && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      exit={{ opacity: 0, height: 0 }}
-                    >
-                      <DurationControl
-                        label="Pause"
-                        value={settings.holdOut}
-                        onChange={(value) => setSettings((s) => ({ ...s, holdOut: value }))}
-                      />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+    .title-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .title-icon {
+      font-size: 1.35rem;
+    }
+
+    .intro {
+      font-size: 0.92rem;
+      line-height: 1.45;
+      color: rgba(255, 255, 255, 0.85);
+      margin: 0 0 24px;
+    }
+
+    .control-group {
+      background: var(--panel-soft);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 14px;
+      margin-bottom: 16px;
+    }
+
+    .control-top,
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .control-top label,
+    .toggle-label {
+      font-size: 0.92rem;
+      color: var(--text);
+    }
+
+    .control-value {
+      min-width: 42px;
+      text-align: right;
+      font-size: 0.92rem;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .control-sub {
+      margin-top: 6px;
+      font-size: 0.76rem;
+      color: rgba(255, 255, 255, 0.8);
+      line-height: 1.35;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      margin-top: 12px;
+      accent-color: #7dd3fc;
+      cursor: pointer;
+    }
+
+    .toggle-stack {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .toggle-row {
+      background: var(--panel-soft);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 14px;
+    }
+
+    .toggle-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      flex: 1;
+      padding-right: 10px;
+    }
+
+    .toggle-icon {
+      flex: 0 0 auto;
+      width: 22px;
+      text-align: center;
+    }
+
+    .toggle-label {
+      word-break: break-word;
+      line-height: 1.3;
+    }
+
+    .switch {
+      position: relative;
+      width: 50px;
+      height: 28px;
+      flex: 0 0 auto;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.18);
+      transition: 0.2s ease;
+      cursor: pointer;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    .slider::before {
+      content: "";
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      left: 3px;
+      top: 3px;
+      border-radius: 50%;
+      background: white;
+      transition: 0.2s ease;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    }
+
+    .switch input:checked + .slider {
+      background: linear-gradient(135deg, #38bdf8, #8b5cf6);
+    }
+
+    .switch input:checked + .slider::before {
+      transform: translateX(22px);
+    }
+
+    .button-row {
+      display: flex;
+      gap: 12px;
+      margin-top: 10px;
+    }
+
+    button {
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 12px 16px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: white;
+      background: rgba(255, 255, 255, 0.1);
+      cursor: pointer;
+      transition: transform 0.15s ease, background 0.15s ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      background: rgba(255, 255, 255, 0.16);
+    }
+
+    .primary {
+      flex: 1;
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.4), rgba(139, 92, 246, 0.4));
+    }
+
+    .right-wrap {
+      height: 100%;
+    }
+
+    .right-card {
+      min-height: 720px;
+      height: 100%;
+      background: var(--panel-softer);
+      padding: 24px 24px 20px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .main-stage {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 0 24px;
+    }
+
+    .circle-shell {
+      position: relative;
+      width: 380px;
+      height: 380px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .circle {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, var(--phase-a), var(--phase-b));
+      box-shadow:
+        0 0 120px color-mix(in srgb, var(--phase-a) 60%, transparent),
+        0 0 200px color-mix(in srgb, var(--phase-b) 40%, transparent);
+      transform: scale(var(--circle-scale));
+      transition:
+        transform var(--stage-duration, 4s) ease-in-out,
+        background 0.8s ease,
+        box-shadow 0.8s ease;
+    }
+
+    .ring,
+    .ring-two {
+      position: absolute;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      pointer-events: none;
+    }
+
+    .ring {
+      inset: 24px;
+      transform: scale(var(--ring-1-scale));
+      animation: ringPulse1 2.8s ease-in-out infinite;
+    }
+
+    .ring-two {
+      inset: 56px;
+      border-color: rgba(255, 255, 255, 0.24);
+      transform: scale(var(--ring-2-scale));
+      animation: ringPulse2 2.2s ease-in-out infinite;
+    }
+
+    @keyframes ringPulse1 {
+      0%, 100% { opacity: 0.2; }
+      50% { opacity: 0.6; }
+    }
+
+    @keyframes ringPulse2 {
+      0%, 100% { opacity: 0.1; }
+      50% { opacity: 0.4; }
+    }
+
+    .circle-text {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+      padding: 0 24px;
+    }
+
+    .phase-label {
+      font-size: 1.9rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: rgba(255,255,255,0.96);
+      text-shadow: 0 4px 20px rgba(0,0,0,0.28);
+    }
+
+    .seconds {
+      margin-top: 16px;
+      font-size: 5.2rem;
+      font-weight: 800;
+      line-height: 1;
+      text-shadow: 0 4px 20px rgba(0,0,0,0.28);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .seconds-label {
+      margin-top: 10px;
+      font-size: 1.1rem;
+      color: rgba(255,255,255,0.95);
+    }
+
+    .phrase-wrap {
+      margin-top: 24px;
+      min-height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 0 24px;
+    }
+
+    .phrase {
+      font-size: 1.55rem;
+      line-height: 1.35;
+      color: rgba(255,255,255,0.9);
+      opacity: 0;
+      transform: translateY(12px);
+      transition: opacity 1.2s ease, transform 1.2s ease;
+      max-width: 900px;
+    }
+
+    .phrase.show {
+      opacity: var(--phrase-opacity);
+      transform: translateY(0);
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: auto;
+    }
+
+    .stat-card {
+      background: var(--panel-soft);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+    }
+
+    .stat-title {
+      font-size: 0.75rem;
+      color: rgba(255,255,255,0.8);
+    }
+
+    .stat-value {
+      font-size: 1.15rem;
+      font-weight: 700;
+      margin-top: 6px;
+    }
+
+    .stat-sub {
+      font-size: 0.75rem;
+      color: rgba(255,255,255,0.7);
+      margin-top: 4px;
+    }
+
+    .progress-track {
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.1);
+      margin-top: 12px;
+      overflow: hidden;
+    }
+
+    .progress-bar {
+      height: 100%;
+      width: 0;
+      border-radius: inherit;
+      background: linear-gradient(135deg, #67e8f9, #a78bfa);
+      transition: width 0.5s ease;
+    }
+
+    .checks {
+      margin-top: 14px;
+      font-size: 10px;
+      color: rgba(255,255,255,0.35);
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    @media (max-width: 1000px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .right-card {
+        min-height: auto;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .app {
+        padding: 16px;
+      }
+
+      .left-card,
+      .right-card {
+        padding: 18px;
+      }
+
+      .circle-shell {
+        width: 300px;
+        height: 300px;
+      }
+
+      .phase-label {
+        font-size: 1.3rem;
+      }
+
+      .seconds {
+        font-size: 4rem;
+      }
+
+      .phrase {
+        font-size: 1.2rem;
+      }
+
+      .stats {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="orbs" id="orbs"></div>
+
+  <div class="app">
+    <div class="layout">
+      <section class="card left-card">
+        <div class="title-row"><span class="title-icon">🌬️</span><span>Breathing Studio</span></div>
+        <p class="intro">Tune the rhythm, start the circle, let your brain stop juggling cutlery.</p>
+
+        <div class="control-group">
+          <div class="control-top">
+            <label for="inhale">Breathe in</label>
+            <div class="control-value"><span id="inhaleVal">4</span>s</div>
+          </div>
+          <input id="inhale" type="range" min="1" max="12" step="1" value="4" />
+        </div>
+
+        <div class="control-group">
+          <div class="control-top">
+            <label for="holdIn">Hold</label>
+            <div class="control-value"><span id="holdInVal">4</span>s</div>
+          </div>
+          <input id="holdIn" type="range" min="1" max="12" step="1" value="4" />
+        </div>
+
+        <div class="control-group">
+          <div class="control-top">
+            <label for="exhale">Breathe out</label>
+            <div class="control-value"><span id="exhaleVal">4</span>s</div>
+          </div>
+          <input id="exhale" type="range" min="1" max="12" step="1" value="4" />
+        </div>
+
+        <div class="control-group">
+          <div class="control-top">
+            <div>
+              <label for="showHoldOut">Include pause after exhale</label>
+              <div class="control-sub">Nice for box breathing and extra calm.</div>
+            </div>
+            <label class="switch">
+              <input id="showHoldOut" type="checkbox" checked />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div id="pauseWrap">
+            <div class="control-group" style="margin: 14px 0 0;">
+              <div class="control-top">
+                <label for="holdOut">Pause</label>
+                <div class="control-value"><span id="holdOutVal">4</span>s</div>
               </div>
-
-              <DurationControl
-                label="Target cycles"
-                value={settings.cyclesTarget}
-                min={1}
-                max={20}
-                onChange={(value) => setSettings((s) => ({ ...s, cyclesTarget: value }))}
-              />
-
-              <div className="grid grid-cols-1 gap-3">
-                <ToggleRow
-                  icon={<MoonStar className="w-4 h-4" />}
-                  label="Soft chime"
-                  checked={soundOn}
-                  onCheckedChange={setSoundOn}
-                />
-                <ToggleRow
-                  icon={<Waves className="w-4 h-4" />}
-                  label="Floating thoughts"
-                  checked={settings.autoRotatePhrases}
-                  onCheckedChange={(checked) => setSettings((s) => ({ ...s, autoRotatePhrases: checked }))}
-                />
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <Button className="flex-1 rounded-2xl" onClick={() => setIsRunning((v) => !v)}>
-                  {isRunning ? <Pause className="w-4 h-4 mr-2" /> : <Play className="w-4 h-4 mr-2" />}
-                  {isRunning ? "Pause" : "Start"}
-                </Button>
-
-                <Button
-                  variant="secondary"
-                  className="rounded-2xl bg-white/10 hover:bg-white/20 text-white border border-white/10"
-                  onClick={resetSession}
-                >
-                  <RotateCcw className="w-4 h-4 mr-2" />
-                  Reset
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="space-y-6 h-full">
-            <Card className="bg-white/6 border-white/10 backdrop-blur-xl rounded-3xl shadow-2xl min-h-[720px] h-full flex flex-col justify-between">
-              <CardContent className="p-6 lg:p-10 flex-1 flex flex-col">
-                <div className="flex-1 flex flex-col items-center justify-center relative py-10">
-                  <AnimatePresence mode="wait">
-                    <motion.div
-                      key={currentStage}
-                      initial={{ opacity: 0.85, scale: 0.85 }}
-                      animate={{ opacity: 1, scale: phase.scale }}
-                      transition={{
-                        duration: clamp(currentStageDuration, 1, 12),
-                        ease: "easeInOut",
-                      }}
-                      className={`relative w-[320px] h-[320px] md:w-[380px] md:h-[380px] rounded-full bg-gradient-to-br ${phase.color} flex items-center justify-center`}
-                      style={{ boxShadow: phase.glow }}
-                    >
-                      <motion.div
-                        className="absolute inset-6 rounded-full border border-white/30"
-                        animate={{
-                          opacity: [0.2, 0.6, 0.2],
-                          scale:
-                            currentStage === "inhale"
-                              ? [0.95, 1.08, 0.95]
-                              : currentStage === "exhale"
-                                ? [1.05, 0.9, 1.05]
-                                : [0.98, 1.03, 0.98],
-                        }}
-                        transition={{ duration: 2.8, repeat: Infinity, ease: "easeInOut" }}
-                      />
-
-                      <motion.div
-                        className="absolute inset-14 rounded-full border border-white/25"
-                        animate={{
-                          opacity: [0.1, 0.4, 0.1],
-                          scale:
-                            currentStage === "inhale"
-                              ? [0.97, 1.05, 0.97]
-                              : currentStage === "exhale"
-                                ? [1.03, 0.92, 1.03]
-                                : [0.99, 1.02, 0.99],
-                        }}
-                        transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
-                      />
-
-                      <div className="text-center z-10 px-6">
-                        <div className="text-2xl md:text-3xl font-semibold uppercase tracking-[0.2em] text-white/95 drop-shadow-lg">
-                          {phase.label}
-                        </div>
-                        <div className="mt-4 text-7xl font-bold tabular-nums drop-shadow-lg">{secondsLeft}</div>
-                        <div className="mt-3 text-lg text-white/95">seconds</div>
-                      </div>
-                    </motion.div>
-                  </AnimatePresence>
-
-                  <div className="mt-6 text-center px-6 min-h-[3.5rem] flex items-center justify-center">
-                    <AnimatePresence mode="wait">
-                      {settings.autoRotatePhrases && (
-                        <motion.p
-                          key={phraseIndex}
-                          initial={{ opacity: 0, y: 12 }}
-                          animate={{ opacity: 0.65, y: 0 }}
-                          exit={{ opacity: 0, y: -12 }}
-                          transition={{ duration: 1.2 }}
-                          className="text-xl md:text-2xl font-medium tracking-wide text-white/90"
-                        >
-                          {PHRASES[phraseIndex]}
-                        </motion.p>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                </div>
-
-                <div className="grid md:grid-cols-2 gap-3 mt-auto">
-                  <StatCard
-                    title="Cycle"
-                    value={`${completedCycles} / ${settings.cyclesTarget}`}
-                    sub="Completed rounds"
-                    progress={targetProgress}
-                  />
-                  <StatCard
-                    title="Pattern"
-                    value={`${settings.inhale}-${settings.holdIn}-${settings.exhale}${
-                      settings.showHoldOut ? `-${settings.holdOut}` : ""
-                    }`}
-                    sub="Seconds per phase"
-                    progress={cycleProgress}
-                  />
-                </div>
-
-                <div className="mt-4 text-[10px] text-white/35">
-                  {SELF_TESTS.every((test) => test.pass) ? "Logic checks passed." : "Logic checks failed."}
-                </div>
-              </CardContent>
-            </Card>
+              <input id="holdOut" type="range" min="1" max="12" step="1" value="4" />
+            </div>
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
 
-function DurationControl({ label, value, onChange, min = 1, max = 12 }) {
-  return (
-    <div className="space-y-3 rounded-2xl bg-white/7 p-4 border border-white/10">
-      <div className="flex items-center justify-between gap-3">
-        <Label className="text-sm text-white/95">{label}</Label>
-        <span className="text-sm text-white/90 w-16 text-right font-medium">{value}s</span>
-      </div>
-      <Slider value={[value]} min={min} max={max} step={1} onValueChange={(vals) => onChange(vals[0])} />
-    </div>
-  );
-}
-
-function ToggleRow({ icon, label, checked, onCheckedChange }) {
-  return (
-    <div className="rounded-2xl bg-white/7 p-4 flex items-center justify-between gap-3 border border-white/10 min-w-0">
-      <div className="flex items-center gap-2 text-sm text-white/95 min-w-0 flex-1">
-        <span className="shrink-0">{icon}</span>
-        <span className="leading-snug break-words">{label}</span>
-      </div>
-      <div className="shrink-0 pl-3">
-        <Switch checked={checked} onCheckedChange={onCheckedChange} />
-      </div>
-    </div>
-  );
-}
-
-function StatCard({ title, value, sub, progress }) {
-  return (
-    <div className="rounded-xl bg-white/7 p-3 border border-white/10 text-white">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <p className="text-xs text-white/80">{title}</p>
-          <p className="text-lg font-semibold mt-1">{value}</p>
-          <p className="text-xs text-white/70 mt-1">{sub}</p>
+        <div class="control-group">
+          <div class="control-top">
+            <label for="cyclesTarget">Target cycles</label>
+            <div class="control-value"><span id="cyclesVal">8</span></div>
+          </div>
+          <input id="cyclesTarget" type="range" min="1" max="20" step="1" value="8" />
         </div>
+
+        <div class="toggle-stack">
+          <div class="toggle-row">
+            <div class="toggle-left">
+              <span class="toggle-icon">🔔</span>
+              <span class="toggle-label">Soft chime</span>
+            </div>
+            <label class="switch">
+              <input id="soundOn" type="checkbox" />
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="toggle-row">
+            <div class="toggle-left">
+              <span class="toggle-icon">💭</span>
+              <span class="toggle-label">Floating thoughts</span>
+            </div>
+            <label class="switch">
+              <input id="thoughtsOn" type="checkbox" checked />
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="button-row">
+          <button id="startBtn" class="primary">▶ Start</button>
+          <button id="resetBtn">↺ Reset</button>
+        </div>
+      </section>
+
+      <div class="right-wrap">
+        <section class="card right-card">
+          <div class="main-stage">
+            <div class="circle-shell">
+              <div class="circle" id="circle">
+                <div class="ring"></div>
+                <div class="ring-two"></div>
+                <div class="circle-text">
+                  <div class="phase-label" id="phaseLabel">Breathe in</div>
+                  <div class="seconds" id="seconds">4</div>
+                  <div class="seconds-label">seconds</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="phrase-wrap">
+              <div class="phrase show" id="phrase"></div>
+            </div>
+          </div>
+
+          <div>
+            <div class="stats">
+              <div class="stat-card">
+                <div class="stat-title">Cycle</div>
+                <div class="stat-value" id="cycleValue">0 / 8</div>
+                <div class="stat-sub">Completed rounds</div>
+                <div class="progress-track"><div class="progress-bar" id="cycleBar"></div></div>
+              </div>
+
+              <div class="stat-card">
+                <div class="stat-title">Pattern</div>
+                <div class="stat-value" id="patternValue">4-4-4-4</div>
+                <div class="stat-sub">Seconds per phase</div>
+                <div class="progress-track"><div class="progress-bar" id="patternBar"></div></div>
+              </div>
+            </div>
+
+            <div class="checks" id="checks"></div>
+          </div>
+        </section>
       </div>
-      <Progress value={clamp(progress, 0, 100)} className="mt-3 h-1.5 bg-white/10" />
     </div>
-  );
-}
+  </div>
+
+  <script>
+    const PHRASES = [
+      "Please breathe in calmly. No need to minute this.",
+      "Exhale gently. The briefing can wait.",
+      "Hold... like a draft awaiting approval.",
+      "Breathe in. Stakeholders are aligned. Mostly.",
+      "Exhale. That email did not need 14 recipients.",
+      "Inhale confidence. Park the action items.",
+      "Hold. We are forming a small working group.",
+      "Exhale. The working group has been noted.",
+      "Breathe in. This is now a priority.",
+      "Exhale. It was always a priority.",
+      "Hold... pending further advice.",
+      "Inhale. The timeline is ambitious yet achievable.",
+      "Exhale. Adjust expectations accordingly.",
+      "Breathe in. The paper is being refined.",
+      "Exhale. The paper is being refined again.",
+      "Hold. Circulate for comment.",
+      "Inhale. Feedback has been incorporated.",
+      "Exhale. Feedback will be incorporated.",
+      "Breathe in. We are taking a strategic pause.",
+      "Exhale. The pause has been extended.",
+      "Hold... awaiting ministerial direction.",
+      "Inhale. This aligns with government priorities.",
+      "Exhale. It always did.",
+      "Breathe in. A draft will be provided shortly.",
+      "Exhale. 'Shortly' is a flexible concept.",
+      "Hold. Let us not rush to a sensible conclusion.",
+      "Inhale. The optics are favourable.",
+      "Exhale. The optics are being managed.",
+      "Breathe in. Noted for future consideration.",
+      "Exhale. Future consideration has arrived."
+    ];
+
+    const STAGES = {
+      inhale: {
+        label: "Breathe in",
+        a: "#38bdf8",
+        b: "#67e8f9",
+        scale: 1,
+        ring1: 1.08,
+        ring2: 1.05
+      },
+      holdIn: {
+        label: "Hold",
+        a: "#a78bfa",
+        b: "#d946ef",
+        scale: 1,
+        ring1: 1.03,
+        ring2: 1.02
+      },
+      exhale: {
+        label: "Breathe out",
+        a: "#34d399",
+        b: "#2dd4bf",
+        scale: 0.72,
+        ring1: 0.9,
+        ring2: 0.92
+      },
+      holdOut: {
+        label: "Pause",
+        a: "#fbbf24",
+        b: "#fb923c",
+        scale: 0.72,
+        ring1: 1.03,
+        ring2: 1.01
+      }
+    };
+
+    const state = {
+      inhale: 4,
+      holdIn: 4,
+      exhale: 4,
+      holdOut: 4,
+      showHoldOut: true,
+      autoRotatePhrases: true,
+      cyclesTarget: 8,
+      soundOn: false,
+      isRunning: false,
+      currentStageIndex: 0,
+      secondsLeft: 4,
+      completedCycles: 0,
+      phraseIndex: 0,
+      timer: null,
+      phraseTimer: null,
+      audioCtx: null
+    };
+
+    const el = {
+      inhale: document.getElementById('inhale'),
+      holdIn: document.getElementById('holdIn'),
+      exhale: document.getElementById('exhale'),
+      holdOut: document.getElementById('holdOut'),
+      showHoldOut: document.getElementById('showHoldOut'),
+      cyclesTarget: document.getElementById('cyclesTarget'),
+      soundOn: document.getElementById('soundOn'),
+      thoughtsOn: document.getElementById('thoughtsOn'),
+      inhaleVal: document.getElementById('inhaleVal'),
+      holdInVal: document.getElementById('holdInVal'),
+      exhaleVal: document.getElementById('exhaleVal'),
+      holdOutVal: document.getElementById('holdOutVal'),
+      cyclesVal: document.getElementById('cyclesVal'),
+      pauseWrap: document.getElementById('pauseWrap'),
+      startBtn: document.getElementById('startBtn'),
+      resetBtn: document.getElementById('resetBtn'),
+      phaseLabel: document.getElementById('phaseLabel'),
+      seconds: document.getElementById('seconds'),
+      phrase: document.getElementById('phrase'),
+      cycleValue: document.getElementById('cycleValue'),
+      patternValue: document.getElementById('patternValue'),
+      cycleBar: document.getElementById('cycleBar'),
+      patternBar: document.getElementById('patternBar'),
+      circle: document.getElementById('circle'),
+      checks: document.getElementById('checks')
+    };
+
+    function clamp(n, min, max) {
+      return Math.max(min, Math.min(max, n));
+    }
+
+    function stageSequence(showHoldOut) {
+      return showHoldOut ? ['inhale', 'holdIn', 'exhale', 'holdOut'] : ['inhale', 'holdIn', 'exhale'];
+    }
+
+    function totalCycleSeconds(settings) {
+      return settings.inhale + settings.holdIn + settings.exhale + (settings.showHoldOut ? settings.holdOut : 0);
+    }
+
+    function cycleRemaining(settings, sequence, stageIdx, secsLeftNow) {
+      let remaining = secsLeftNow;
+      for (let i = stageIdx + 1; i < sequence.length; i += 1) {
+        remaining += settings[sequence[i]];
+      }
+      return remaining;
+    }
+
+    const SELF_TESTS = [
+      () => JSON.stringify(stageSequence(true)) === JSON.stringify(['inhale', 'holdIn', 'exhale', 'holdOut']),
+      () => JSON.stringify(stageSequence(false)) === JSON.stringify(['inhale', 'holdIn', 'exhale']),
+      () => totalCycleSeconds({ inhale: 4, holdIn: 4, exhale: 4, holdOut: 4, showHoldOut: true }) === 16,
+      () => totalCycleSeconds({ inhale: 4, holdIn: 4, exhale: 6, holdOut: 9, showHoldOut: false }) === 14,
+      () => cycleRemaining({ inhale: 4, holdIn: 4, exhale: 4, holdOut: 4 }, ['inhale', 'holdIn', 'exhale', 'holdOut'], 1, 2) === 10,
+      () => clamp(12, 1, 10) === 10 && clamp(-2, 1, 10) === 1 && clamp(5, 1, 10) === 5,
+      () => cycleRemaining({ inhale: 3, holdIn: 3, exhale: 3 }, ['inhale', 'holdIn', 'exhale'], 0, 2) === 8
+    ];
+
+    function runSelfTests() {
+      const pass = SELF_TESTS.every(fn => {
+        try { return fn(); } catch { return false; }
+      });
+      el.checks.textContent = pass ? 'Logic checks passed.' : 'Logic checks failed.';
+    }
+
+    function getSequence() {
+      return stageSequence(state.showHoldOut);
+    }
+
+    function getCurrentStageKey() {
+      const sequence = getSequence();
+      return sequence[state.currentStageIndex] || sequence[0];
+    }
+
+    function syncControlValues() {
+      el.inhaleVal.textContent = state.inhale;
+      el.holdInVal.textContent = state.holdIn;
+      el.exhaleVal.textContent = state.exhale;
+      el.holdOutVal.textContent = state.holdOut;
+      el.cyclesVal.textContent = state.cyclesTarget;
+      el.pauseWrap.classList.toggle('hidden', !state.showHoldOut);
+    }
+
+    function syncStats() {
+      const total = totalCycleSeconds(state);
+      const sequence = getSequence();
+      const remaining = cycleRemaining(state, sequence, state.currentStageIndex, state.secondsLeft);
+      const cycleProgress = total > 0 ? ((total - remaining) / total) * 100 : 0;
+      const targetProgress = state.cyclesTarget > 0 ? (state.completedCycles / state.cyclesTarget) * 100 : 0;
+
+      el.cycleValue.textContent = `${state.completedCycles} / ${state.cyclesTarget}`;
+      el.patternValue.textContent = `${state.inhale}-${state.holdIn}-${state.exhale}${state.showHoldOut ? `-${state.holdOut}` : ''}`;
+      el.cycleBar.style.width = `${clamp(targetProgress, 0, 100)}%`;
+      el.patternBar.style.width = `${clamp(cycleProgress, 0, 100)}%`;
+    }
+
+    function applyPhaseStyle() {
+      const stageKey = getCurrentStageKey();
+      const phase = STAGES[stageKey];
+      const root = document.documentElement;
+      root.style.setProperty('--phase-a', phase.a);
+      root.style.setProperty('--phase-b', phase.b);
+      root.style.setProperty('--circle-scale', phase.scale);
+      root.style.setProperty('--ring-1-scale', phase.ring1);
+      root.style.setProperty('--ring-2-scale', phase.ring2);
+      root.style.setProperty('--stage-duration', `${state[stageKey]}s`);
+      el.phaseLabel.textContent = phase.label;
+      el.seconds.textContent = state.secondsLeft;
+    }
+
+    function renderPhrase(immediate = false) {
+      if (!state.autoRotatePhrases) {
+        el.phrase.textContent = '';
+        el.phrase.classList.remove('show');
+        return;
+      }
+
+      const text = PHRASES[state.phraseIndex % PHRASES.length];
+      el.phrase.classList.remove('show');
+
+      const paint = () => {
+        el.phrase.textContent = text;
+        requestAnimationFrame(() => el.phrase.classList.add('show'));
+      };
+
+      if (immediate || !el.phrase.textContent) {
+        paint();
+      } else {
+        setTimeout(paint, 120);
+      }
+    }
+
+    function beep() {
+      if (!state.soundOn) return;
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+        if (!state.audioCtx) state.audioCtx = new AudioContextClass();
+        const ctx = state.audioCtx;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = 660;
+        gain.gain.value = 0.0001;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        const now = ctx.currentTime;
+        gain.gain.exponentialRampToValueAtTime(0.03, now + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+        osc.start(now);
+        osc.stop(now + 0.18);
+      } catch (err) {
+        // polite silence
+      }
+    }
+
+    function moveToNextStage() {
+      const sequence = getSequence();
+      const nextIndex = state.currentStageIndex + 1;
+      if (nextIndex >= sequence.length) {
+        state.completedCycles += 1;
+        state.currentStageIndex = 0;
+        state.secondsLeft = state[sequence[0]];
+        beep();
+        if (state.completedCycles >= state.cyclesTarget && state.cyclesTarget > 0) {
+          pauseSession();
+        }
+        refresh();
+        return;
+      }
+      state.currentStageIndex = nextIndex;
+      state.secondsLeft = state[sequence[nextIndex]];
+      beep();
+      refresh();
+    }
+
+    function tick() {
+      if (!state.isRunning) return;
+      if (state.secondsLeft > 1) {
+        state.secondsLeft -= 1;
+        refresh();
+      } else {
+        state.secondsLeft = 0;
+        refresh();
+        moveToNextStage();
+      }
+    }
+
+    function startSession() {
+      if (state.isRunning) return;
+      state.isRunning = true;
+      el.startBtn.textContent = '⏸ Pause';
+      state.timer = setInterval(tick, 1000);
+    }
+
+    function pauseSession() {
+      state.isRunning = false;
+      el.startBtn.textContent = '▶ Start';
+      clearInterval(state.timer);
+      state.timer = null;
+    }
+
+    function resetSession() {
+      pauseSession();
+      state.currentStageIndex = 0;
+      state.secondsLeft = state.inhale;
+      state.completedCycles = 0;
+      refresh();
+    }
+
+    function refresh() {
+      syncControlValues();
+      syncStats();
+      applyPhaseStyle();
+    }
+
+    function startPhraseRotation() {
+      clearInterval(state.phraseTimer);
+      if (!state.autoRotatePhrases) {
+        renderPhrase(true);
+        return;
+      }
+      renderPhrase(true);
+      state.phraseTimer = setInterval(() => {
+        state.phraseIndex = (state.phraseIndex + 1) % PHRASES.length;
+        renderPhrase();
+      }, 4200);
+    }
+
+    function bindRange(id, key, onChange) {
+      el[id].addEventListener('input', (e) => {
+        state[key] = parseInt(e.target.value, 10);
+        if (!state.isRunning) {
+          const stageKey = getCurrentStageKey();
+          state.secondsLeft = state[stageKey];
+        }
+        if (onChange) onChange();
+        refresh();
+      });
+    }
+
+    bindRange('inhale', 'inhale');
+    bindRange('holdIn', 'holdIn');
+    bindRange('exhale', 'exhale');
+    bindRange('holdOut', 'holdOut');
+    bindRange('cyclesTarget', 'cyclesTarget');
+
+    el.showHoldOut.addEventListener('change', (e) => {
+      state.showHoldOut = e.target.checked;
+      state.currentStageIndex = 0;
+      state.secondsLeft = state.inhale;
+      refresh();
+    });
+
+    el.soundOn.addEventListener('change', (e) => {
+      state.soundOn = e.target.checked;
+    });
+
+    el.thoughtsOn.addEventListener('change', (e) => {
+      state.autoRotatePhrases = e.target.checked;
+      startPhraseRotation();
+    });
+
+    el.startBtn.addEventListener('click', () => {
+      if (state.isRunning) pauseSession();
+      else startSession();
+    });
+
+    el.resetBtn.addEventListener('click', resetSession);
+
+    function buildOrbs() {
+      const orbRoot = document.getElementById('orbs');
+      for (let i = 0; i < 9; i += 1) {
+        const orb = document.createElement('div');
+        orb.className = 'orb';
+        const size = 120 + i * 22;
+        orb.style.width = `${size}px`;
+        orb.style.height = `${size}px`;
+        orb.style.left = `${(i * 13) % 88}%`;
+        orb.style.top = `${(i * 11) % 84}%`;
+        orb.style.animationDuration = `${10 + i}s`;
+        orbRoot.appendChild(orb);
+      }
+    }
+
+    buildOrbs();
+    runSelfTests();
+    refresh();
+    startPhraseRotation();
+  </script>
+</body>
+</html>
