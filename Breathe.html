@@ -13,8 +13,6 @@
       --panel-softer: rgba(255, 255, 255, 0.06);
       --border: rgba(255, 255, 255, 0.1);
       --text: rgba(255, 255, 255, 0.95);
-      --muted: rgba(255, 255, 255, 0.8);
-      --muted-2: rgba(255, 255, 255, 0.7);
       --shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
       --phase-a: #38bdf8;
       --phase-b: #67e8f9;
@@ -236,12 +234,6 @@
       transform: translateX(22px);
     }
 
-    .button-row {
-      display: flex;
-      gap: 12px;
-      margin-top: 10px;
-    }
-
     button {
       border: 1px solid var(--border);
       border-radius: 18px;
@@ -294,6 +286,13 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      transition: opacity 0.45s ease, transform 0.45s ease;
+    }
+
+    .circle-shell.hidden {
+      opacity: 0;
+      transform: scale(0.9);
+      pointer-events: none;
     }
 
     .circle {
@@ -312,7 +311,26 @@
       transition:
         transform var(--stage-duration, 4s) ease-in-out,
         background 0.8s ease,
-        box-shadow 0.8s ease;
+        box-shadow 0.8s ease,
+        filter 0.25s ease;
+      cursor: pointer;
+    }
+
+    .circle:hover {
+      filter: brightness(1.08);
+    }
+
+    .circle.start-mode {
+      animation: startGlow 2.4s ease-in-out infinite;
+    }
+
+    @keyframes startGlow {
+      0%, 100% {
+        transform: scale(0.98);
+      }
+      50% {
+        transform: scale(1.02);
+      }
     }
 
     .ring,
@@ -400,6 +418,49 @@
     .phrase.show {
       opacity: var(--phrase-opacity);
       transform: translateY(0);
+    }
+
+    .completion-card {
+      width: min(520px, 100%);
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 24px;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.3);
+      backdrop-filter: blur(18px);
+      padding: 28px;
+      text-align: center;
+      opacity: 0;
+      transform: translateY(16px) scale(0.97);
+      transition: opacity 0.35s ease, transform 0.35s ease;
+      pointer-events: none;
+      display: none;
+    }
+
+    .completion-card.show {
+      display: block;
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+
+    .completion-title {
+      font-size: 1.7rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .completion-text {
+      font-size: 1rem;
+      color: rgba(255,255,255,0.82);
+      line-height: 1.45;
+      margin-bottom: 20px;
+    }
+
+    .completion-actions {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
     }
 
     .stats {
@@ -499,6 +560,10 @@
       .stats {
         grid-template-columns: 1fr;
       }
+
+      .completion-card {
+        padding: 22px 18px;
+      }
     }
   </style>
 </head>
@@ -588,30 +653,34 @@
             </label>
           </div>
         </div>
-
-        <div class="button-row">
-          <button id="startBtn" class="primary">▶ Start</button>
-          <button id="resetBtn">↺ Reset</button>
-        </div>
       </section>
 
       <div class="right-wrap">
         <section class="card right-card">
           <div class="main-stage">
-            <div class="circle-shell">
-              <div class="circle" id="circle">
+            <div class="circle-shell" id="circleShell">
+              <div class="circle start-mode" id="circle" role="button" tabindex="0" aria-label="Start breathing session">
                 <div class="ring"></div>
                 <div class="ring-two"></div>
                 <div class="circle-text">
-                  <div class="phase-label" id="phaseLabel">Breathe in</div>
-                  <div class="seconds" id="seconds">4</div>
-                  <div class="seconds-label">seconds</div>
+                  <div class="phase-label" id="phaseLabel">Start</div>
+                  <div class="seconds" id="seconds"></div>
+                  <div class="seconds-label hidden" id="secondsLabel">seconds</div>
                 </div>
               </div>
             </div>
 
+            <div class="completion-card" id="completionCard">
+              <div class="completion-title">Breathing complete. You are oxygenated.</div>
+              <div class="completion-text">Excellent work. Your lungs have filed a very positive report and your nervous system has been advised accordingly.</div>
+              <div class="completion-actions">
+                <button id="restartBtn" class="primary">Start another session?</button>
+                <button id="showCircleBtn">Bring the circle back</button>
+              </div>
+            </div>
+
             <div class="phrase-wrap">
-              <div class="phrase show" id="phrase"></div>
+              <div class="phrase" id="phrase"></div>
             </div>
           </div>
 
@@ -718,12 +787,13 @@
       cyclesTarget: 8,
       soundOn: false,
       isRunning: false,
+      hasStarted: false,
+      isComplete: false,
       currentStageIndex: 0,
       secondsLeft: 4,
       completedCycles: 0,
       phraseIndex: 0,
       timer: null,
-      phraseTimer: null,
       audioCtx: null
     };
 
@@ -742,16 +812,19 @@
       holdOutVal: document.getElementById('holdOutVal'),
       cyclesVal: document.getElementById('cyclesVal'),
       pauseWrap: document.getElementById('pauseWrap'),
-      startBtn: document.getElementById('startBtn'),
-      resetBtn: document.getElementById('resetBtn'),
       phaseLabel: document.getElementById('phaseLabel'),
       seconds: document.getElementById('seconds'),
+      secondsLabel: document.getElementById('secondsLabel'),
       phrase: document.getElementById('phrase'),
       cycleValue: document.getElementById('cycleValue'),
       patternValue: document.getElementById('patternValue'),
       cycleBar: document.getElementById('cycleBar'),
       patternBar: document.getElementById('patternBar'),
       circle: document.getElementById('circle'),
+      circleShell: document.getElementById('circleShell'),
+      completionCard: document.getElementById('completionCard'),
+      restartBtn: document.getElementById('restartBtn'),
+      showCircleBtn: document.getElementById('showCircleBtn'),
       checks: document.getElementById('checks')
     };
 
@@ -782,7 +855,10 @@
       () => totalCycleSeconds({ inhale: 4, holdIn: 4, exhale: 6, holdOut: 9, showHoldOut: false }) === 14,
       () => cycleRemaining({ inhale: 4, holdIn: 4, exhale: 4, holdOut: 4 }, ['inhale', 'holdIn', 'exhale', 'holdOut'], 1, 2) === 10,
       () => clamp(12, 1, 10) === 10 && clamp(-2, 1, 10) === 1 && clamp(5, 1, 10) === 5,
-      () => cycleRemaining({ inhale: 3, holdIn: 3, exhale: 3 }, ['inhale', 'holdIn', 'exhale'], 0, 2) === 8
+      () => cycleRemaining({ inhale: 3, holdIn: 3, exhale: 3 }, ['inhale', 'holdIn', 'exhale'], 0, 2) === 8,
+      () => totalCycleSeconds({ inhale: 5, holdIn: 2, exhale: 7, holdOut: 1, showHoldOut: true }) === 15,
+      () => JSON.stringify(stageSequence(false)) !== JSON.stringify(['inhale', 'holdIn', 'exhale', 'holdOut']),
+      () => cycleRemaining({ inhale: 2, holdIn: 2, exhale: 2, holdOut: 2 }, ['inhale', 'holdIn', 'exhale', 'holdOut'], 3, 1) === 1
     ];
 
     function runSelfTests() {
@@ -813,7 +889,9 @@
     function syncStats() {
       const total = totalCycleSeconds(state);
       const sequence = getSequence();
-      const remaining = cycleRemaining(state, sequence, state.currentStageIndex, state.secondsLeft);
+      const remaining = state.hasStarted
+        ? cycleRemaining(state, sequence, state.currentStageIndex, state.secondsLeft)
+        : total;
       const cycleProgress = total > 0 ? ((total - remaining) / total) * 100 : 0;
       const targetProgress = state.cyclesTarget > 0 ? (state.completedCycles / state.cyclesTarget) * 100 : 0;
 
@@ -824,9 +902,24 @@
     }
 
     function applyPhaseStyle() {
+      const root = document.documentElement;
+
+      if (!state.hasStarted) {
+        root.style.setProperty('--phase-a', '#38bdf8');
+        root.style.setProperty('--phase-b', '#67e8f9');
+        root.style.setProperty('--circle-scale', '1');
+        root.style.setProperty('--ring-1-scale', '1.03');
+        root.style.setProperty('--ring-2-scale', '1.02');
+        root.style.setProperty('--stage-duration', '4s');
+        el.phaseLabel.textContent = 'Start';
+        el.seconds.textContent = '';
+        el.secondsLabel.classList.add('hidden');
+        el.circle.classList.add('start-mode');
+        return;
+      }
+
       const stageKey = getCurrentStageKey();
       const phase = STAGES[stageKey];
-      const root = document.documentElement;
       root.style.setProperty('--phase-a', phase.a);
       root.style.setProperty('--phase-b', phase.b);
       root.style.setProperty('--circle-scale', phase.scale);
@@ -835,10 +928,12 @@
       root.style.setProperty('--stage-duration', `${state[stageKey]}s`);
       el.phaseLabel.textContent = phase.label;
       el.seconds.textContent = state.secondsLeft;
+      el.secondsLabel.classList.remove('hidden');
+      el.circle.classList.remove('start-mode');
     }
 
-    function renderPhrase(immediate = false) {
-      if (!state.autoRotatePhrases) {
+    function renderPhrase(show = false) {
+      if (!state.autoRotatePhrases || !state.hasStarted || state.isComplete) {
         el.phrase.textContent = '';
         el.phrase.classList.remove('show');
         return;
@@ -846,17 +941,22 @@
 
       const text = PHRASES[state.phraseIndex % PHRASES.length];
       el.phrase.classList.remove('show');
+      el.phrase.textContent = text;
 
-      const paint = () => {
-        el.phrase.textContent = text;
+      if (show) {
         requestAnimationFrame(() => el.phrase.classList.add('show'));
-      };
-
-      if (immediate || !el.phrase.textContent) {
-        paint();
-      } else {
-        setTimeout(paint, 120);
       }
+    }
+
+    function advancePhrase() {
+      if (!state.autoRotatePhrases || !state.hasStarted || state.isComplete) {
+        renderPhrase(false);
+        return;
+      }
+      renderPhrase(false);
+      setTimeout(() => {
+        renderPhrase(true);
+      }, 120);
     }
 
     function beep() {
@@ -883,20 +983,42 @@
       }
     }
 
+    function showCompletion() {
+      state.isComplete = true;
+      pauseSession();
+      el.circleShell.classList.add('hidden');
+      el.completionCard.classList.add('show');
+      renderPhrase(false);
+      refresh();
+    }
+
+    function hideCompletion() {
+      state.isComplete = false;
+      el.circleShell.classList.remove('hidden');
+      el.completionCard.classList.remove('show');
+    }
+
     function moveToNextStage() {
       const sequence = getSequence();
       const nextIndex = state.currentStageIndex + 1;
+
       if (nextIndex >= sequence.length) {
         state.completedCycles += 1;
+        state.phraseIndex = (state.phraseIndex + 1) % PHRASES.length;
+        advancePhrase();
+
+        if (state.completedCycles >= state.cyclesTarget && state.cyclesTarget > 0) {
+          showCompletion();
+          return;
+        }
+
         state.currentStageIndex = 0;
         state.secondsLeft = state[sequence[0]];
         beep();
-        if (state.completedCycles >= state.cyclesTarget && state.cyclesTarget > 0) {
-          pauseSession();
-        }
         refresh();
         return;
       }
+
       state.currentStageIndex = nextIndex;
       state.secondsLeft = state[sequence[nextIndex]];
       beep();
@@ -904,7 +1026,7 @@
     }
 
     function tick() {
-      if (!state.isRunning) return;
+      if (!state.isRunning || state.isComplete) return;
       if (state.secondsLeft > 1) {
         state.secondsLeft -= 1;
         refresh();
@@ -917,23 +1039,38 @@
 
     function startSession() {
       if (state.isRunning) return;
+      if (state.isComplete) {
+        hideCompletion();
+      }
+      if (!state.hasStarted || state.completedCycles >= state.cyclesTarget) {
+        state.hasStarted = true;
+        state.completedCycles = 0;
+        state.currentStageIndex = 0;
+        state.secondsLeft = state.inhale;
+        state.phraseIndex = 0;
+      }
       state.isRunning = true;
-      el.startBtn.textContent = '⏸ Pause';
+      clearInterval(state.timer);
       state.timer = setInterval(tick, 1000);
+      advancePhrase();
+      refresh();
     }
 
     function pauseSession() {
       state.isRunning = false;
-      el.startBtn.textContent = '▶ Start';
       clearInterval(state.timer);
       state.timer = null;
     }
 
     function resetSession() {
       pauseSession();
+      hideCompletion();
+      state.hasStarted = false;
       state.currentStageIndex = 0;
       state.secondsLeft = state.inhale;
       state.completedCycles = 0;
+      state.phraseIndex = 0;
+      renderPhrase(false);
       refresh();
     }
 
@@ -943,25 +1080,15 @@
       applyPhaseStyle();
     }
 
-    function startPhraseRotation() {
-      clearInterval(state.phraseTimer);
-      if (!state.autoRotatePhrases) {
-        renderPhrase(true);
-        return;
-      }
-      renderPhrase(true);
-      state.phraseTimer = setInterval(() => {
-        state.phraseIndex = (state.phraseIndex + 1) % PHRASES.length;
-        renderPhrase();
-      }, 4200);
-    }
-
     function bindRange(id, key, onChange) {
       el[id].addEventListener('input', (e) => {
         state[key] = parseInt(e.target.value, 10);
-        if (!state.isRunning) {
+        if (!state.isRunning && state.hasStarted && !state.isComplete) {
           const stageKey = getCurrentStageKey();
           state.secondsLeft = state[stageKey];
+        }
+        if (!state.hasStarted) {
+          state.secondsLeft = state.inhale;
         }
         if (onChange) onChange();
         refresh();
@@ -987,15 +1114,37 @@
 
     el.thoughtsOn.addEventListener('change', (e) => {
       state.autoRotatePhrases = e.target.checked;
-      startPhraseRotation();
+      if (state.autoRotatePhrases && state.hasStarted && !state.isComplete) {
+        advancePhrase();
+      } else {
+        renderPhrase(false);
+      }
     });
 
-    el.startBtn.addEventListener('click', () => {
-      if (state.isRunning) pauseSession();
-      else startSession();
+    el.circle.addEventListener('click', () => {
+      if (!state.hasStarted || !state.isRunning || state.isComplete) {
+        startSession();
+      }
     });
 
-    el.resetBtn.addEventListener('click', resetSession);
+    el.circle.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        if (!state.hasStarted || !state.isRunning || state.isComplete) {
+          startSession();
+        }
+      }
+    });
+
+    el.restartBtn.addEventListener('click', () => {
+      state.hasStarted = false;
+      state.isComplete = false;
+      startSession();
+    });
+
+    el.showCircleBtn.addEventListener('click', () => {
+      resetSession();
+    });
 
     function buildOrbs() {
       const orbRoot = document.getElementById('orbs');
@@ -1015,7 +1164,7 @@
     buildOrbs();
     runSelfTests();
     refresh();
-    startPhraseRotation();
+    renderPhrase(false);
   </script>
 </body>
 </html>
