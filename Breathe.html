@@ -156,11 +156,53 @@
       cursor: pointer;
     }
 
+    .advanced-options {
+      margin-top: 8px;
+      margin-bottom: 16px;
+      background: var(--panel-soft);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      overflow: hidden;
+    }
+
+    .advanced-options summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 14px 16px;
+      font-size: 0.92rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      user-select: none;
+    }
+
+    .advanced-options summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .advanced-options summary::after {
+      content: "▾";
+      font-size: 0.95rem;
+      opacity: 0.85;
+      transition: transform 0.2s ease;
+    }
+
+    .advanced-options[open] summary::after {
+      transform: rotate(180deg);
+    }
+
+    .advanced-options-body {
+      padding: 0 14px 14px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+
     .toggle-stack {
       display: grid;
       grid-template-columns: 1fr;
       gap: 12px;
-      margin-bottom: 16px;
+      margin-top: 14px;
     }
 
     .toggle-row {
@@ -186,7 +228,8 @@
     }
 
     .toggle-label {
-      word-break: break-word;
+      word-break: normal;
+      overflow-wrap: break-word;
       line-height: 1.3;
     }
 
@@ -276,7 +319,33 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 32px 0 24px;
+      padding: 20px 0 24px;
+      gap: 12px;
+    }
+
+    .phrase-wrap {
+      min-height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 0 24px;
+      width: 100%;
+    }
+
+    .phrase {
+      font-size: 1.55rem;
+      line-height: 1.35;
+      color: rgba(255,255,255,0.9);
+      opacity: 0;
+      transform: translateY(12px);
+      transition: opacity 1.2s ease, transform 1.2s ease;
+      max-width: 900px;
+    }
+
+    .phrase.show {
+      opacity: var(--phrase-opacity);
+      transform: translateY(0);
     }
 
     .circle-shell {
@@ -287,6 +356,7 @@
       align-items: center;
       justify-content: center;
       transition: opacity 0.45s ease, transform 0.45s ease;
+      margin-top: 8px;
     }
 
     .circle-shell.hidden {
@@ -395,31 +465,6 @@
       color: rgba(255,255,255,0.95);
     }
 
-    .phrase-wrap {
-      margin-top: 24px;
-      min-height: 60px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-      padding: 0 24px;
-    }
-
-    .phrase {
-      font-size: 1.55rem;
-      line-height: 1.35;
-      color: rgba(255,255,255,0.9);
-      opacity: 0;
-      transform: translateY(12px);
-      transition: opacity 1.2s ease, transform 1.2s ease;
-      max-width: 900px;
-    }
-
-    .phrase.show {
-      opacity: var(--phrase-opacity);
-      transform: translateY(0);
-    }
-
     .completion-card {
       width: min(520px, 100%);
       background: rgba(255,255,255,0.1);
@@ -434,6 +479,7 @@
       transition: opacity 0.35s ease, transform 0.35s ease;
       pointer-events: none;
       display: none;
+      margin-top: 8px;
     }
 
     .completion-card.show {
@@ -581,7 +627,7 @@
             <label for="inhale">Breathe in</label>
             <div class="control-value"><span id="inhaleVal">4</span>s</div>
           </div>
-          <input id="inhale" type="range" min="1" max="12" step="1" value="4" />
+          <input id="inhale" type="range" min="3" max="12" step="1" value="4" />
         </div>
 
         <div class="control-group">
@@ -589,7 +635,7 @@
             <label for="holdIn">Hold</label>
             <div class="control-value"><span id="holdInVal">4</span>s</div>
           </div>
-          <input id="holdIn" type="range" min="1" max="12" step="1" value="4" />
+          <input id="holdIn" type="range" min="3" max="12" step="1" value="4" />
         </div>
 
         <div class="control-group">
@@ -597,7 +643,7 @@
             <label for="exhale">Breathe out</label>
             <div class="control-value"><span id="exhaleVal">4</span>s</div>
           </div>
-          <input id="exhale" type="range" min="1" max="12" step="1" value="4" />
+          <input id="exhale" type="range" min="3" max="12" step="1" value="4" />
         </div>
 
         <div class="control-group">
@@ -617,7 +663,7 @@
                 <label for="holdOut">Pause</label>
                 <div class="control-value"><span id="holdOutVal">4</span>s</div>
               </div>
-              <input id="holdOut" type="range" min="1" max="12" step="1" value="4" />
+              <input id="holdOut" type="range" min="3" max="12" step="1" value="4" />
             </div>
           </div>
         </div>
@@ -630,34 +676,62 @@
           <input id="cyclesTarget" type="range" min="1" max="20" step="1" value="8" />
         </div>
 
-        <div class="toggle-stack">
-          <div class="toggle-row">
-            <div class="toggle-left">
-              <span class="toggle-icon">🔔</span>
-              <span class="toggle-label">Soft chime</span>
+        <details class="advanced-options">
+          <summary>More options</summary>
+          <div class="advanced-options-body">
+            <div class="toggle-stack">
+              <div class="toggle-row">
+                <div class="toggle-left">
+                  <span class="toggle-icon">🔢</span>
+                  <span class="toggle-label">Count up</span>
+                </div>
+                <label class="switch">
+                  <input id="countUpOn" type="checkbox" checked />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="toggle-row">
+                <div class="toggle-left">
+                  <span class="toggle-icon">🎲</span>
+                  <span class="toggle-label">Moving pattern</span>
+                </div>
+                <label class="switch">
+                  <input id="movingPatternOn" type="checkbox" />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="toggle-row">
+                <div class="toggle-left">
+                  <span class="toggle-icon">🔔</span>
+                  <span class="toggle-label">Soft chime</span>
+                </div>
+                <label class="switch">
+                  <input id="soundOn" type="checkbox" />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="toggle-row">
+                <div class="toggle-left">
+                  <span class="toggle-icon">💭</span>
+                  <span class="toggle-label">Floating thoughts</span>
+                </div>
+                <label class="switch">
+                  <input id="thoughtsOn" type="checkbox" checked />
+                  <span class="slider"></span>
+                </label>
+              </div>
             </div>
-            <label class="switch">
-              <input id="soundOn" type="checkbox" />
-              <span class="slider"></span>
-            </label>
           </div>
-
-          <div class="toggle-row">
-            <div class="toggle-left">
-              <span class="toggle-icon">💭</span>
-              <span class="toggle-label">Floating thoughts</span>
-            </div>
-            <label class="switch">
-              <input id="thoughtsOn" type="checkbox" checked />
-              <span class="slider"></span>
-            </label>
-          </div>
-        </div>
+        </details>
       </section>
 
       <div class="right-wrap">
         <section class="card right-card">
           <div class="main-stage">
+            <div class="phrase-wrap">
+              <div class="phrase" id="phrase"></div>
+            </div>
+
             <div class="circle-shell" id="circleShell">
               <div class="circle start-mode" id="circle" role="button" tabindex="0" aria-label="Start breathing session">
                 <div class="ring"></div>
@@ -677,10 +751,6 @@
                 <button id="restartBtn" class="primary">Start another session?</button>
                 <button id="showCircleBtn">Bring the circle back</button>
               </div>
-            </div>
-
-            <div class="phrase-wrap">
-              <div class="phrase" id="phrase"></div>
             </div>
           </div>
 
@@ -710,36 +780,36 @@
 
   <script>
     const PHRASES = [
-      "Please breathe in calmly. No need to minute this.",
-      "Exhale gently. The briefing can wait.",
-      "Hold... like a draft awaiting approval.",
-      "Breathe in. Stakeholders are aligned. Mostly.",
-      "Exhale. That email did not need 14 recipients.",
-      "Inhale confidence. Park the action items.",
-      "Hold. We are forming a small working group.",
-      "Exhale. The working group has been noted.",
-      "Breathe in. This is now a priority.",
-      "Exhale. It was always a priority.",
-      "Hold... pending further advice.",
-      "Inhale. The timeline is ambitious yet achievable.",
-      "Exhale. Adjust expectations accordingly.",
-      "Breathe in. The paper is being refined.",
-      "Exhale. The paper is being refined again.",
-      "Hold. Circulate for comment.",
-      "Inhale. Feedback has been incorporated.",
-      "Exhale. Feedback will be incorporated.",
-      "Breathe in. We are taking a strategic pause.",
-      "Exhale. The pause has been extended.",
-      "Hold... awaiting ministerial direction.",
-      "Inhale. This aligns with government priorities.",
-      "Exhale. It always did.",
-      "Breathe in. A draft will be provided shortly.",
-      "Exhale. 'Shortly' is a flexible concept.",
-      "Hold. Let us not rush to a sensible conclusion.",
-      "Inhale. The optics are favourable.",
-      "Exhale. The optics are being managed.",
-      "Breathe in. Noted for future consideration.",
-      "Exhale. Future consideration has arrived."
+      "No need to minute this.",
+      "The briefing can wait.",
+      "Like a draft awaiting approval.",
+      "Stakeholders are aligned. Mostly.",
+      "That email did not need 14 recipients.",
+      "Confidence is noted. Action items parked.",
+      "We are forming a small working group.",
+      "The working group has been noted.",
+      "This is now a priority.",
+      "It was always a priority.",
+      "Pending further advice.",
+      "The timeline is ambitious yet achievable.",
+      "Adjust expectations accordingly.",
+      "The paper is being refined.",
+      "The paper is being refined again.",
+      "Circulate for comment.",
+      "Feedback has been incorporated.",
+      "Feedback will be incorporated.",
+      "We are taking a strategic pause.",
+      "The pause has been extended.",
+      "Awaiting ministerial direction.",
+      "This aligns with government priorities.",
+      "It always did.",
+      "A draft will be provided shortly.",
+      "'Shortly' is a flexible concept.",
+      "Let us not rush to a sensible conclusion.",
+      "The optics are favourable.",
+      "The optics are being managed.",
+      "Noted for future consideration.",
+      "Future consideration has arrived."
     ];
 
     const STAGES = {
@@ -747,17 +817,17 @@
         label: "Breathe in",
         a: "#38bdf8",
         b: "#67e8f9",
-        scale: 1,
-        ring1: 1.08,
-        ring2: 1.05
+        scale: 1.5,
+        ring1: 1.2,
+        ring2: 1.15
       },
       holdIn: {
         label: "Hold",
         a: "#a78bfa",
         b: "#d946ef",
-        scale: 1,
-        ring1: 1.03,
-        ring2: 1.02
+        scale: 1.5,
+        ring1: 1.2,
+        ring2: 1.15
       },
       exhale: {
         label: "Breathe out",
@@ -772,12 +842,20 @@
         a: "#fbbf24",
         b: "#fb923c",
         scale: 0.72,
-        ring1: 1.03,
-        ring2: 1.01
+        ring1: 0.9,
+        ring2: 0.92
       }
     };
 
     const state = {
+      baseInhale: 4,
+      baseHoldIn: 4,
+      baseExhale: 4,
+      baseHoldOut: 4,
+      movingPatternOn: false,
+      countUpOn: true,
+      stageElapsed: 0,
+      variationPlan: null,
       phrasesList: [...PHRASES],
       inhale: 4,
       holdIn: 4,
@@ -807,6 +885,8 @@
       cyclesTarget: document.getElementById('cyclesTarget'),
       soundOn: document.getElementById('soundOn'),
       thoughtsOn: document.getElementById('thoughtsOn'),
+      movingPatternOn: document.getElementById('movingPatternOn'),
+      countUpOn: document.getElementById('countUpOn'),
       inhaleVal: document.getElementById('inhaleVal'),
       holdInVal: document.getElementById('holdInVal'),
       exhaleVal: document.getElementById('exhaleVal'),
@@ -841,6 +921,99 @@
       return settings.inhale + settings.holdIn + settings.exhale + (settings.showHoldOut ? settings.holdOut : 0);
     }
 
+    function getBaseValueForKey(key) {
+      const map = {
+        inhale: state.baseInhale,
+        holdIn: state.baseHoldIn,
+        exhale: state.baseExhale,
+        holdOut: state.baseHoldOut
+      };
+      return map[key];
+    }
+
+    function getStageKeysForVariation() {
+      return state.showHoldOut ? ['inhale', 'holdIn', 'exhale', 'holdOut'] : ['inhale', 'holdIn', 'exhale'];
+    }
+
+    function chooseVariationPlan() {
+      const candidates = getStageKeysForVariation().filter((key) => {
+        const current = state[key];
+        return current > 3 || current < 12;
+      });
+
+      if (!candidates.length) return null;
+
+      let stageKey = candidates[Math.floor(Math.random() * candidates.length)];
+      let preferredDelta = null;
+
+      if (state.variationPlan && candidates.includes(state.variationPlan.stageKey) && Math.random() < 0.6) {
+        stageKey = state.variationPlan.stageKey;
+        preferredDelta = state.variationPlan.delta;
+      }
+
+      const current = state[stageKey];
+      const directions = [];
+      if (current > 3) directions.push(-1);
+      if (current < 12) directions.push(1);
+      if (!directions.length) return null;
+
+      let delta = preferredDelta;
+      if (!directions.includes(delta)) {
+        delta = directions[Math.floor(Math.random() * directions.length)];
+      }
+
+      const waitCyclesRemaining = 2 + Math.floor(Math.random() * 3);
+      return { stageKey, delta, waitCyclesRemaining };
+    }
+
+    function applyMovingPattern() {
+      state.inhale = state.baseInhale;
+      state.holdIn = state.baseHoldIn;
+      state.exhale = state.baseExhale;
+      state.holdOut = state.baseHoldOut;
+
+      if (!state.movingPatternOn) {
+        state.variationPlan = null;
+        return;
+      }
+
+      if (!state.variationPlan) {
+        state.variationPlan = chooseVariationPlan();
+      }
+
+      if (!state.variationPlan) return;
+
+      const { stageKey } = state.variationPlan;
+      state[stageKey] = clamp(state[stageKey], 3, 12);
+    }
+
+    function completeVariationCycle() {
+      if (!state.movingPatternOn) return;
+
+      if (!state.variationPlan) {
+        state.variationPlan = chooseVariationPlan();
+      }
+
+      if (!state.variationPlan) {
+        applyMovingPattern();
+        return;
+      }
+
+      state.variationPlan.waitCyclesRemaining -= 1;
+
+      if (state.variationPlan.waitCyclesRemaining <= 0) {
+        const { stageKey, delta } = state.variationPlan;
+        state[stageKey] = clamp(state[stageKey] + delta, 3, 12);
+        state.baseInhale = state.inhale;
+        state.baseHoldIn = state.holdIn;
+        state.baseExhale = state.exhale;
+        state.baseHoldOut = state.holdOut;
+        state.variationPlan = chooseVariationPlan();
+      }
+
+      applyMovingPattern();
+    }
+
     function cycleRemaining(settings, sequence, stageIdx, secsLeftNow) {
       let remaining = secsLeftNow;
       for (let i = stageIdx + 1; i < sequence.length; i += 1) {
@@ -855,11 +1028,44 @@
       () => totalCycleSeconds({ inhale: 4, holdIn: 4, exhale: 4, holdOut: 4, showHoldOut: true }) === 16,
       () => totalCycleSeconds({ inhale: 4, holdIn: 4, exhale: 6, holdOut: 9, showHoldOut: false }) === 14,
       () => cycleRemaining({ inhale: 4, holdIn: 4, exhale: 4, holdOut: 4 }, ['inhale', 'holdIn', 'exhale', 'holdOut'], 1, 2) === 10,
-      () => clamp(12, 1, 10) === 10 && clamp(-2, 1, 10) === 1 && clamp(5, 1, 10) === 5,
+      () => clamp(12, 3, 10) === 10 && clamp(-2, 3, 10) === 3 && clamp(5, 3, 10) === 5,
       () => cycleRemaining({ inhale: 3, holdIn: 3, exhale: 3 }, ['inhale', 'holdIn', 'exhale'], 0, 2) === 8,
       () => totalCycleSeconds({ inhale: 5, holdIn: 2, exhale: 7, holdOut: 1, showHoldOut: true }) === 15,
       () => JSON.stringify(stageSequence(false)) !== JSON.stringify(['inhale', 'holdIn', 'exhale', 'holdOut']),
-      () => cycleRemaining({ inhale: 2, holdIn: 2, exhale: 2, holdOut: 2 }, ['inhale', 'holdIn', 'exhale', 'holdOut'], 3, 1) === 1
+      () => cycleRemaining({ inhale: 2, holdIn: 2, exhale: 2, holdOut: 2 }, ['inhale', 'holdIn', 'exhale', 'holdOut'], 3, 1) === 1,
+      () => {
+        state.countUpOn = true;
+        state.secondsLeft = 3;
+        state.exhale = 5;
+        return (state.exhale - state.secondsLeft + 1) === 3;
+      },
+      () => {
+        state.baseInhale = 4; state.baseHoldIn = 4; state.baseExhale = 4; state.baseHoldOut = 4;
+        state.showHoldOut = true; state.movingPatternOn = true; state.variationPlan = { stageKey: 'inhale', delta: 1, waitCyclesRemaining: 1 };
+        state.inhale = 4; state.holdIn = 4; state.exhale = 4; state.holdOut = 4;
+        completeVariationCycle();
+        return state.inhale === 5 && state.holdIn === 4 && state.exhale === 4 && state.holdOut === 4;
+      },
+      () => {
+        state.baseInhale = 4; state.baseHoldIn = 4; state.baseExhale = 4; state.baseHoldOut = 4;
+        state.showHoldOut = false;
+        const keys = getStageKeysForVariation();
+        return JSON.stringify(keys) === JSON.stringify(['inhale', 'holdIn', 'exhale']);
+      },
+      () => {
+        state.inhale = 4; state.holdIn = 4; state.exhale = 4; state.holdOut = 4;
+        state.baseInhale = 4; state.baseHoldIn = 4; state.baseExhale = 4; state.baseHoldOut = 4;
+        state.showHoldOut = true; state.movingPatternOn = true; state.variationPlan = { stageKey: 'exhale', delta: 1, waitCyclesRemaining: 2 };
+        completeVariationCycle();
+        const unchanged = state.exhale === 4;
+        completeVariationCycle();
+        return unchanged && state.exhale === 5;
+      },
+      () => {
+        const temp = document.createElement('div');
+        temp.innerHTML = '<div id="circle"></div><div id="phrase"></div>';
+        return temp.querySelector('#circle') !== null && temp.querySelector('#phrase') !== null;
+      }
     ];
 
     function runSelfTests() {
@@ -885,6 +1091,8 @@
       el.holdOutVal.textContent = state.holdOut;
       el.cyclesVal.textContent = state.cyclesTarget;
       el.pauseWrap.classList.toggle('hidden', !state.showHoldOut);
+      el.movingPatternOn.checked = state.movingPatternOn;
+      el.countUpOn.checked = state.countUpOn;
     }
 
     function syncStats() {
@@ -928,7 +1136,8 @@
       root.style.setProperty('--ring-2-scale', phase.ring2);
       root.style.setProperty('--stage-duration', `${state[stageKey]}s`);
       el.phaseLabel.textContent = phase.label;
-      el.seconds.textContent = state.secondsLeft;
+      const displayedSeconds = state.countUpOn ? state.stageElapsed : state.secondsLeft;
+      el.seconds.textContent = displayedSeconds;
       el.secondsLabel.classList.remove('hidden');
       el.circle.classList.remove('start-mode');
     }
@@ -997,7 +1206,6 @@
       ];
 
       const chosen = messages[Math.floor(Math.random() * messages.length)];
-
       document.querySelector('.completion-title').textContent = chosen.title;
       document.querySelector('.completion-text').textContent = chosen.text;
 
@@ -1029,8 +1237,10 @@
           return;
         }
 
+        completeVariationCycle();
         state.currentStageIndex = 0;
         state.secondsLeft = state[sequence[0]];
+        state.stageElapsed = state.countUpOn ? 1 : state[sequence[0]];
         beep();
         refresh();
         return;
@@ -1038,17 +1248,24 @@
 
       state.currentStageIndex = nextIndex;
       state.secondsLeft = state[sequence[nextIndex]];
+      state.stageElapsed = state.countUpOn ? 1 : state[sequence[nextIndex]];
       beep();
       refresh();
     }
 
     function tick() {
       if (!state.isRunning || state.isComplete) return;
+
+      const stageKey = getCurrentStageKey();
+      const stageDuration = state[stageKey];
+
       if (state.secondsLeft > 1) {
         state.secondsLeft -= 1;
+        state.stageElapsed = state.countUpOn ? (stageDuration - state.secondsLeft + 1) : state.secondsLeft;
         refresh();
       } else {
         state.secondsLeft = 0;
+        state.stageElapsed = state.countUpOn ? stageDuration : 0;
         refresh();
         moveToNextStage();
       }
@@ -1065,17 +1282,20 @@
 
     function startSession() {
       if (state.isRunning) return;
-      if (state.isComplete) {
-        hideCompletion();
-      }
+      if (state.isComplete) hideCompletion();
+
       if (!state.hasStarted || state.completedCycles >= state.cyclesTarget) {
         state.hasStarted = true;
         state.completedCycles = 0;
         state.currentStageIndex = 0;
-        state.secondsLeft = state.inhale;
         state.phraseIndex = 0;
         state.phrasesList = shuffleArray(PHRASES);
+        state.variationPlan = null;
+        applyMovingPattern();
+        state.secondsLeft = state.inhale;
+        state.stageElapsed = state.countUpOn ? 1 : state.inhale;
       }
+
       state.isRunning = true;
       clearInterval(state.timer);
       state.timer = setInterval(tick, 1000);
@@ -1095,8 +1315,14 @@
       state.hasStarted = false;
       state.currentStageIndex = 0;
       state.secondsLeft = state.inhale;
+      state.stageElapsed = 0;
       state.completedCycles = 0;
       state.phraseIndex = 0;
+      state.variationPlan = null;
+      state.inhale = state.baseInhale;
+      state.holdIn = state.baseHoldIn;
+      state.exhale = state.baseExhale;
+      state.holdOut = state.baseHoldOut;
       renderPhrase(false);
       refresh();
     }
@@ -1109,13 +1335,27 @@
 
     function bindRange(id, key, onChange) {
       el[id].addEventListener('input', (e) => {
-        state[key] = parseInt(e.target.value, 10);
+        const value = parseInt(e.target.value, 10);
+        state[key] = value;
+
+        if (key === 'inhale') state.baseInhale = value;
+        if (key === 'holdIn') state.baseHoldIn = value;
+        if (key === 'exhale') state.baseExhale = value;
+        if (key === 'holdOut') state.baseHoldOut = value;
+
+        if (state.movingPatternOn) {
+          state.variationPlan = null;
+          applyMovingPattern();
+        }
+
         if (!state.isRunning && state.hasStarted && !state.isComplete) {
           const stageKey = getCurrentStageKey();
           state.secondsLeft = state[stageKey];
+          state.stageElapsed = state.countUpOn ? 1 : state[stageKey];
         }
         if (!state.hasStarted) {
           state.secondsLeft = state.inhale;
+          state.stageElapsed = state.countUpOn ? 1 : state.inhale;
         }
         if (onChange) onChange();
         refresh();
@@ -1131,7 +1371,14 @@
     el.showHoldOut.addEventListener('change', (e) => {
       state.showHoldOut = e.target.checked;
       state.currentStageIndex = 0;
+      state.variationPlan = null;
+      state.baseInhale = state.inhale;
+      state.baseHoldIn = state.holdIn;
+      state.baseExhale = state.exhale;
+      state.baseHoldOut = state.holdOut;
+      applyMovingPattern();
       state.secondsLeft = state.inhale;
+      state.stageElapsed = state.countUpOn ? 1 : state.inhale;
       refresh();
     });
 
@@ -1146,6 +1393,28 @@
       } else {
         renderPhrase(false);
       }
+    });
+
+    el.movingPatternOn.addEventListener('change', (e) => {
+      state.movingPatternOn = e.target.checked;
+      state.variationPlan = null;
+      applyMovingPattern();
+      if (!state.isRunning) {
+        const stageKey = state.hasStarted ? getCurrentStageKey() : 'inhale';
+        state.secondsLeft = state[stageKey];
+        state.stageElapsed = state.countUpOn ? 1 : state[stageKey];
+      }
+      refresh();
+    });
+
+    el.countUpOn.addEventListener('change', (e) => {
+      state.countUpOn = e.target.checked;
+      if (state.hasStarted && !state.isComplete) {
+        const stageKey = getCurrentStageKey();
+        const stageDuration = state[stageKey];
+        state.stageElapsed = state.countUpOn ? (stageDuration - state.secondsLeft + 1) : state.secondsLeft;
+      }
+      refresh();
     });
 
     el.circle.addEventListener('click', () => {
