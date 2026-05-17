@@ -240,6 +240,7 @@ let muzzleFlash = 0;
 let titleSequenceStarted = false;
 let densityLevel = 3; // scaled down intensity
 let resultCardTimer = null;
+let shotCount = 0;
 
 function rand(min, max) {
   return Math.random() * (max - min) + min;
@@ -376,14 +377,36 @@ function fire(x, y) {
   recoil = 10;
   muzzleFlash = 0.08;
 
-  playBoom(76, 0.16, 1.25);
+  shotCount += 1;
+  const isFlakShell = shotCount % 50 === 0;
+  const isCylinderBomb = !isFlakShell && shotCount % 10 === 0;
+  const projectileSpeed = isCylinderBomb ? baseSpeed * 1.03 : baseSpeed;
+
+  playBoom(
+    isFlakShell ? 92 : (isCylinderBomb ? 62 : 76),
+    isFlakShell ? 0.18 : (isCylinderBomb ? 0.22 : 0.16),
+    isFlakShell ? 1.35 : (isCylinderBomb ? 1.45 : 1.25)
+  );
+
   projectiles.push({
     x: startX,
     y: startY,
-    vx: Math.cos(angle) * baseSpeed,
-    vy: Math.sin(angle) * baseSpeed,
+    vx: Math.cos(angle) * projectileSpeed,
+    vy: Math.sin(angle) * projectileSpeed,
     trail: [],
-    bounced: false
+    bounced: false,
+    type: isFlakShell ? 'flakShell' : (isCylinderBomb ? 'cylinderBomb' : 'cannonBall'),
+    indestructible: isCylinderBomb,
+    r: isCylinderBomb ? 13 : (isFlakShell ? 7 : 6),
+    length: isCylinderBomb ? 34 : 0,
+    lengthScale: isCylinderBomb ? 0.22 : 1,
+    widthScale: isCylinderBomb ? 0.42 : 1,
+    spin: 0,
+    spinSpeed: isCylinderBomb ? rand(2.1, 2.8) : 0,
+    age: 0,
+    fuse: isFlakShell ? rand(1.02, 1.28) : null,
+    lastVy: Math.sin(angle) * projectileSpeed,
+    blastRadius: isFlakShell ? 155 : 0
   });
 }
 
@@ -435,6 +458,64 @@ function explode(x, y, power = 1, colorSet = null) {
   playBoom(118, 0.1, 0.85);
 }
 
+function flakBurst(shell) {
+  const radius = shell.blastRadius || 118;
+  const colors = ['#fff4a8', '#ffd17c', '#ff9ec5', '#cfd9ff', '#b8ffe6', '#ffffff'];
+
+  // Soft expanding rings, like a calm little firework flower.
+  for (let ring = 0; ring < 3; ring++) {
+    particles.push({
+      x: shell.x,
+      y: shell.y,
+      vx: 0,
+      vy: 0,
+      life: 1.05 + ring * 0.24,
+      maxLife: 1.05 + ring * 0.24,
+      size: radius * (0.62 + ring * 0.3),
+      color: colors[ring],
+      ring: true,
+      lineWidth: 3 - ring * 0.55
+    });
+  }
+
+  // Gentle spokes and sparks.
+  const sparkCount = 84;
+  for (let i = 0; i < sparkCount; i++) {
+    const a = (Math.PI * 2 * i) / sparkCount + rand(-0.035, 0.035);
+    const s = rand(80, 210);
+    particles.push({
+      x: shell.x,
+      y: shell.y,
+      vx: Math.cos(a) * s,
+      vy: Math.sin(a) * s,
+      life: rand(0.65, 1.35),
+      maxLife: 1.35,
+      size: rand(2, 5),
+      color: colors[Math.floor(Math.random() * colors.length)]
+    });
+  }
+
+  let popped = 0;
+  for (const t of targets) {
+    if (t.hit) continue;
+    const dx = t.x - shell.x;
+    const dy = t.y - shell.y;
+    const popDist = radius + t.r;
+    if (dx * dx + dy * dy <= popDist * popDist) {
+      t.hit = true;
+      popped += 1;
+      explode(t.x, t.y, 0.72, [t.c1, t.c2, '#ffffff']);
+    }
+  }
+
+  if (popped > 0) {
+    updateScore(popped * 10);
+    setTimeout(() => playPop(), 35);
+  }
+
+  playBoom(140, 0.18, 1.05);
+}
+
 canvas.onclick = (e) => {
   if (sessionPaused) return;
   fire(e.clientX, e.clientY);
@@ -459,6 +540,7 @@ function resetSession() {
   particles = [];
   cloudWords = [];
   score = 0;
+  shotCount = 0;
   scoreStatus.textContent = 'Calm points: 0';
   soundStatus.textContent = '...that helped.';
   fade = 1;
@@ -598,12 +680,26 @@ function update(dt) {
   // Slightly reduced gravity for longer, floatier arcs
   const gravity = 260;
   projectiles.forEach(p => {
+    p.age = (p.age || 0) + dt;
+    p.lastVy = p.vy;
+
     p.vx += wind * dt;
-    p.vy += gravity * dt;
+    const gravityFactor = 1;
+    p.vy += gravity * gravityFactor * dt;
     p.vx *= 0.999;
     p.vy *= 0.999;
     p.x += p.vx * dt;
     p.y += p.vy * dt;
+
+    if (p.type === 'flakShell') {
+      p.fuse -= dt;
+      const nearApex = p.age > 0.42 && p.lastVy < 0 && p.vy >= 6;
+      const fuseExpired = p.fuse <= 0;
+      if (!p.hit && (nearApex || fuseExpired)) {
+        p.hit = true;
+        flakBurst(p);
+      }
+    }
 
     if (!p.bounced && p.y >= h - 72) {
       p.bounced = true;
@@ -613,11 +709,17 @@ function update(dt) {
     for (const t of targets) {
       const dx = p.x - t.x;
       const dy = p.y - t.y;
-      const hitDist = p.r ? p.r + t.r : 6 + t.r;
+      const hitDist = p.type === 'cylinderBomb' ? (Math.max(6, (p.r || 13) * (p.widthScale ?? 1)) + t.r) : (p.r ? p.r + t.r : 6 + t.r);
       if (dx * dx + dy * dy <= hitDist * hitDist) {
+        if (p.type === 'flakShell') {
+          p.hit = true;
+          flakBurst(p);
+          break;
+        }
+
         t.hit = true;
-        p.hit = true;
-        explode(t.x, t.y, 1, [t.c1, t.c2, '#ffffff']);
+        if (!p.indestructible) p.hit = true;
+        explode(t.x, t.y, p.indestructible ? 1.15 : 1, [t.c1, t.c2, '#ffffff']);
         setTimeout(() => playPop(), 40);
         updateScore(10);
 
@@ -639,11 +741,27 @@ function update(dt) {
       }
     }
 
+    p.spin += p.spinSpeed * dt;
+    if (p.type === 'cylinderBomb') {
+      if (p.lengthScale < 1) {
+        p.lengthScale += dt * 1.35;
+        if (p.lengthScale > 1) p.lengthScale = 1;
+      }
+      if (p.widthScale < 1) {
+        p.widthScale += dt * 0.95;
+        if (p.widthScale > 1) p.widthScale = 1;
+      }
+    }
+
     p.trail.push({ x: p.x, y: p.y });
-    if (p.trail.length > 14) p.trail.shift();
+    const maxTrail = p.indestructible ? 22 : 14;
+    if (p.trail.length > maxTrail) p.trail.shift();
   });
 
-  projectiles = projectiles.filter(p => !p.hit && p.x > -120 && p.x < w + 120 && p.y < h + 120);
+  projectiles = projectiles.filter(p => {
+    const margin = p.type === 'cylinderBomb' ? 220 : 120;
+    return !p.hit && p.x > -margin && p.x < w + margin && p.y > -margin && p.y < h + margin;
+  });
 
   particles.forEach(pt => {
     pt.life -= dt;
@@ -725,17 +843,80 @@ function drawCannon() {
 function drawProjectiles() {
   projectiles.forEach(p => {
     p.trail.forEach((t, i) => {
-      ctx.fillStyle = `rgba(255,255,255,${(i + 1) / p.trail.length * 0.22})`;
+      const trailStrength = p.indestructible ? 0.32 : 0.22;
+      ctx.fillStyle = `rgba(255,255,255,${(i + 1) / p.trail.length * trailStrength})`;
       ctx.beginPath();
       ctx.arc(t.x, t.y, 2 + i * 0.08, 0, Math.PI * 2);
       ctx.fill();
     });
 
-    ctx.fillStyle = '#1f2940';
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
-    ctx.fill();
+    if (p.type === 'cylinderBomb') {
+      drawCylinderBomb(p);
+      return;
+    }
+
+    if (p.type === 'flakShell') {
+      ctx.save();
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = '#fff4a8';
+      const glow = ctx.createRadialGradient(p.x - 2, p.y - 2, 1, p.x, p.y, 12);
+      glow.addColorStop(0, '#fff4a8');
+      glow.addColorStop(0.55, '#ff96c2');
+      glow.addColorStop(1, '#6f83f5');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.fillStyle = '#1f2940';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
   });
+}
+
+function drawCylinderBomb(p) {
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(p.spin);
+
+  const lengthScale = p.lengthScale ?? 1;
+  const widthScale = p.widthScale ?? 1;
+  const length = (p.length || 34) * lengthScale;
+  const radius = (p.r || 13) * widthScale;
+
+  const bodyGradient = ctx.createLinearGradient(0, -radius, 0, radius);
+  bodyGradient.addColorStop(0, '#596579');
+  bodyGradient.addColorStop(0.5, '#2d3548');
+  bodyGradient.addColorStop(1, '#141a29');
+
+  ctx.fillStyle = bodyGradient;
+  ctx.beginPath();
+  ctx.roundRect(-length / 2, -radius, length, radius * 2, radius);
+  ctx.fill();
+
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  ctx.beginPath();
+  ctx.ellipse(-length * 0.18, -radius * 0.35, length * 0.25, radius * 0.22, -0.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.34)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-length * 0.24, -radius * 0.72);
+  ctx.lineTo(-length * 0.24, radius * 0.72);
+  ctx.moveTo(length * 0.24, -radius * 0.72);
+  ctx.lineTo(length * 0.24, radius * 0.72);
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffcc66';
+  ctx.beginPath();
+  ctx.arc(length / 2 + 3, 0, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
 }
 
 function drawTargets() {
@@ -760,10 +941,20 @@ function drawTargets() {
 function drawParticles() {
   particles.forEach(pt => {
     ctx.globalAlpha = Math.max(0, pt.life / pt.maxLife);
-    ctx.fillStyle = pt.color;
-    ctx.beginPath();
-    ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
-    ctx.fill();
+
+    if (pt.ring) {
+      const progress = 1 - Math.max(0, pt.life / pt.maxLife);
+      ctx.strokeStyle = pt.color;
+      ctx.lineWidth = pt.lineWidth || 2;
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, pt.size * (0.28 + progress * 0.9), 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = pt.color;
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
   });
   ctx.globalAlpha = 1;
 }
@@ -923,6 +1114,7 @@ function runTests() {
   console.assert(typeof playBoom === 'function', 'playBoom should exist');
   console.assert(typeof playBounce === 'function', 'playBounce should exist');
   console.assert(typeof playPop === 'function', 'playPop should exist');
+  console.assert(typeof flakBurst === 'function', 'flakBurst should exist');
   const beforeTargets = targets.length;
   spawnTarget();
   console.assert(targets.length === beforeTargets + 1, 'spawnTarget should add a target');
@@ -934,6 +1126,10 @@ function runTests() {
   console.assert(cloudWords.length === beforeCloudWords + 1, 'spawnCloudWord should add a cloud word');
   densityLevel = 5;
   console.assert(densityLevel === 5, 'density level should be adjustable');
+  shotCount = 9;
+  const tenthShotIsBomb = (shotCount + 1) % 10 === 0;
+  console.assert(tenthShotIsBomb === true, 'every tenth shot should be an indestructible cylinder bomb');
+  shotCount = 0;
   const testSpawnCount = Math.max(1, Math.ceil(densityLevel * 0.3));
   console.assert(testSpawnCount >= 1 && testSpawnCount <= 2, 'density scaling should stay moderate at max slider');
   resultScore.textContent = '42';
