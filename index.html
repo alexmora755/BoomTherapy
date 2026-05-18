@@ -221,6 +221,7 @@ resize();
 let projectiles = [];
 let targets = [];
 let particles = [];
+let splashes = [];
 let cloudWords = [];
 let audioCtx = null;
 let wind = 0;
@@ -363,7 +364,7 @@ function fire(x, y) {
   ensureAudio();
 
   const startX = w / 2;
-  const startY = h - 50;
+  const startY = h - 46;
   const dx = x - startX;
   const dy = y - startY;
   const angle = Math.atan2(dy, dx);
@@ -406,7 +407,9 @@ function fire(x, y) {
     age: 0,
     fuse: isFlakShell ? rand(1.02, 1.28) : null,
     lastVy: Math.sin(angle) * projectileSpeed,
-    blastRadius: isFlakShell ? 155 : 0
+    blastRadius: isFlakShell ? 155 : 0,
+    splashArmedAfter: isCylinderBomb ? 0.38 : 0.18,
+    splashY: h - rand(18, 66)
   });
 }
 
@@ -456,6 +459,43 @@ function explode(x, y, power = 1, colorSet = null) {
     });
   }
   playBoom(118, 0.1, 0.85);
+}
+
+
+function splash(x, y, size = 1) {
+  const waterTop = h - 70;
+  const depth = Math.max(0, Math.min(1, (y - waterTop) / 52));
+  const visualScale = 1 - depth * 0.28;
+  const dropletCount = Math.floor(12 * size * visualScale);
+  for (let i = 0; i < dropletCount; i++) {
+    const a = rand(-Math.PI * 0.92, -Math.PI * 0.08);
+    const s = rand(45, 145) * size;
+    splashes.push({
+      x,
+      y,
+      vx: Math.cos(a) * s,
+      vy: Math.sin(a) * s,
+      life: rand(0.45, 0.9),
+      maxLife: 0.9,
+      size: rand(2, 5) * size * visualScale
+    });
+  }
+
+  for (let i = 0; i < 3; i++) {
+    splashes.push({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      life: 0.55 + i * 0.12,
+      maxLife: 0.55 + i * 0.12,
+      size: (14 * size + i * 10) * visualScale,
+      ripple: true,
+      lineWidth: Math.max(1, 3 - i * 0.55)
+    });
+  }
+
+  playBounce();
 }
 
 function flakBurst(shell) {
@@ -538,6 +578,7 @@ function resetSession() {
   projectiles = [];
   targets = [];
   particles = [];
+  splashes = [];
   cloudWords = [];
   score = 0;
   shotCount = 0;
@@ -701,9 +742,18 @@ function update(dt) {
       }
     }
 
-    if (!p.bounced && p.y >= h - 72) {
+    const waterY = p.splashY || (h - 70);
+    const splashRadius = p.type === 'cylinderBomb'
+      ? Math.max(8, (p.r || 13) * (p.widthScale ?? 1))
+      : (p.r || 6);
+
+    const splashArmed = (p.age || 0) >= (p.splashArmedAfter || 0.18);
+    const fallingIntoWater = p.vy > 0 && p.y + splashRadius >= waterY;
+
+    if (!p.splashed && splashArmed && fallingIntoWater) {
+      p.splashed = true;
       p.bounced = true;
-      playBounce();
+      splash(p.x, waterY, p.type === 'cylinderBomb' ? 1.75 : 1);
     }
 
     for (const t of targets) {
@@ -760,6 +810,7 @@ function update(dt) {
 
   projectiles = projectiles.filter(p => {
     const margin = p.type === 'cylinderBomb' ? 220 : 120;
+    if (p.splashed && (p.type === 'cannonBall' || p.type === 'cylinderBomb')) return false;
     return !p.hit && p.x > -margin && p.x < w + margin && p.y > -margin && p.y < h + margin;
   });
 
@@ -771,6 +822,17 @@ function update(dt) {
     pt.vy = pt.vy * 0.985 + 14 * dt;
   });
   particles = particles.filter(pt => pt.life > 0);
+
+  splashes.forEach(sp => {
+    sp.life -= dt;
+    if (!sp.ripple) {
+      sp.x += sp.vx * dt;
+      sp.y += sp.vy * dt;
+      sp.vx *= 0.985;
+      sp.vy = sp.vy * 0.985 + 260 * dt;
+    }
+  });
+  splashes = splashes.filter(sp => sp.life > 0);
 
   cloudWords.forEach(word => {
     word.life -= dt;
@@ -795,13 +857,39 @@ function drawSky() {
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
 
-  ctx.fillStyle = '#c7e1c8';
-  ctx.fillRect(0, h - 70, w, 70);
+  const waterY = h - 70;
+  const waterGradient = ctx.createLinearGradient(0, waterY, 0, h);
+  waterGradient.addColorStop(0, 'rgba(154, 210, 232, 0.92)');
+  waterGradient.addColorStop(1, 'rgba(106, 176, 214, 0.96)');
+  ctx.fillStyle = waterGradient;
+  ctx.fillRect(0, waterY, w, 70);
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.34)';
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 8; i++) {
+    const y = waterY + 10 + i * 8;
+    const offset = Math.sin(performance.now() * 0.001 + i) * 12;
+    ctx.beginPath();
+    ctx.moveTo(20 + offset, y);
+    ctx.quadraticCurveTo(w * 0.25, y - 4, w * 0.5 + offset, y);
+    ctx.quadraticCurveTo(w * 0.75, y + 4, w - 20 + offset, y);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = '#a8cf8f';
+  ctx.beginPath();
+  ctx.ellipse(w / 2, h - 42, 92, 30, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#7fb06f';
+  ctx.beginPath();
+  ctx.ellipse(w / 2, h - 48, 72, 18, 0, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 function drawCannon() {
   ctx.save();
-  ctx.translate(w / 2, h - 50);
+  ctx.translate(w / 2, h - 46);
 
   // solid base (partially enclosing pivot)
   ctx.fillStyle = '#3e4762';
@@ -959,6 +1047,29 @@ function drawParticles() {
   ctx.globalAlpha = 1;
 }
 
+function drawSplashes() {
+  splashes.forEach(sp => {
+    const alpha = Math.max(0, sp.life / sp.maxLife);
+    ctx.globalAlpha = alpha * 0.92;
+
+    if (sp.ripple) {
+      const progress = 1 - alpha;
+      ctx.strokeStyle = 'rgba(255,255,255,0.96)';
+      ctx.lineWidth = sp.lineWidth || 2;
+      ctx.beginPath();
+      ctx.ellipse(sp.x, sp.y, sp.size * (0.45 + progress), sp.size * 0.22 * (0.35 + progress), 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = 'rgba(248, 253, 255, 0.98)';
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, sp.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+
+  ctx.globalAlpha = 1;
+}
+
 function spawnCloudWord() {
   const words = [
     'I\'m fine',
@@ -1081,6 +1192,7 @@ function draw() {
   drawTargets();
   drawProjectiles();
   drawParticles();
+  drawSplashes();
   drawCloudWords();
   drawCannon();
   drawFade();
@@ -1115,6 +1227,7 @@ function runTests() {
   console.assert(typeof playBounce === 'function', 'playBounce should exist');
   console.assert(typeof playPop === 'function', 'playPop should exist');
   console.assert(typeof flakBurst === 'function', 'flakBurst should exist');
+  console.assert(typeof splash === 'function', 'splash should exist');
   const beforeTargets = targets.length;
   spawnTarget();
   console.assert(targets.length === beforeTargets + 1, 'spawnTarget should add a target');
